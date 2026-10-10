@@ -32,9 +32,13 @@ extension ExtraAvesEntryProps on AvesEntry {
 
   bool get isPureVideo => isVideo && !isAnimated;
 
+  // remote
+
+  bool get isWebDav => uri.startsWith('http://') || uri.startsWith('https://');
+
   // size
 
-  bool get useTiles => !isAnimated;
+  bool get useTiles => !isWebDav && !isAnimated;
 
   bool get isSized => width > 0 && height > 0;
 
@@ -98,6 +102,8 @@ extension ExtraAvesEntryProps on AvesEntry {
   // storage
 
   String? get storagePath {
+    // remote entries have no local storage path
+    if (isWebDav) return null;
     if (trashed) {
       final _storagePath = trashDetails?.path;
       if (_storagePath != null) {
@@ -125,6 +131,8 @@ extension ExtraAvesEntryProps on AvesEntry {
   }
 
   bool get isMissingAtPath {
+    // remote entries are not checked against the local file system
+    if (isWebDav) return false;
     final _storagePath = storagePath;
     return _storagePath != null && !File(_storagePath).existsSync();
   }

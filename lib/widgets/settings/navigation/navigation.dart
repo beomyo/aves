@@ -16,6 +16,7 @@ import 'package:aves/widgets/settings/navigation/bottom_nav_actions_editor_page.
 import 'package:aves/widgets/settings/navigation/confirmation_dialog_page.dart';
 import 'package:aves/widgets/settings/navigation/drawer_editor_page.dart';
 import 'package:aves/widgets/settings/settings_definition.dart';
+import 'package:aves/widgets/webdav/webdav_server_list_page.dart';
 import 'package:aves_model/aves_model.dart';
 import 'package:collection/collection.dart';
 import 'package:material_ui/material_ui.dart';
@@ -42,6 +43,7 @@ class NavigationSection extends SettingsSection {
     SettingsTileNavigationDrawer(),
     if (!settings.useTvLayout) SettingsTileNavigationBottomActions(),
     if (!settings.useTvLayout) SettingsTileNavigationConfirmationDialog(),
+    SettingsTileNavigationWebDav(),
   ]);
 }
 
@@ -170,8 +172,22 @@ class SettingsTileNavigationConfirmationDialog extends SettingsTile {
   );
 }
 
-class SettingsTileNavigationKeepScreenOn extends SettingsTile {
+class SettingsTileNavigationWebDav extends SettingsTile {
   @override
+  List<String> get settingKeys => const [];
+
+  @override
+  String title(BuildContext context) => context.l10n.webdavTitle;
+
+  @override
+  Widget build(BuildContext context) => SettingsSubPageTile(
+    title: title,
+    routeName: WebDavServerListPage.routeName,
+    builder: (context) => const WebDavServerListPage(),
+  );
+}
+
+class SettingsTileNavigationKeepScreenOn extends SettingsTile {  @override
   List<String> get settingKeys => [SettingKeys.keepScreenOnKey];
 
   @override

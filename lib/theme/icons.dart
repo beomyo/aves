@@ -62,6 +62,7 @@ class AIcons {
   static const size = Symbols.data_usage;
   static const storageCard = Symbols.sd_storage;
   static const storageMain = Symbols.smartphone;
+  static const cloud = Symbols.cloud;
   static const trackVideo = Symbols.movie;
   static const trackAudio = Symbols.audiotrack;
   static const trackText = Symbols.closed_caption;

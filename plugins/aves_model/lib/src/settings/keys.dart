@@ -166,6 +166,12 @@ class SettingKeys {
   // bin
   static const enableBinKey = 'enable_bin';
 
+  // webdav
+  static const webDavServersKey = 'webdav_servers';
+  static const webDavColumnsKey = 'webdav_columns';
+  static const webDavLayoutKey = 'webdav_layout';
+  static const webDavLayoutBarKey = 'webdav_layout_bar';
+
   // accessibility
   static const showPinchGestureAlternativesKey = 'show_pinch_gesture_alternatives';
   static const accessibilityAnimationsKey = 'accessibility_animations';

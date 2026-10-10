@@ -182,10 +182,11 @@ android {
 }
 
 androidComponents {
-    onVariants(selector().withFlavor("store", "izzy")) { variant ->
+    onVariants { variant ->
         // uncompressed native libraries are recommended:
         // https://developer.android.com/build/releases/agp-4-2-0-release-notes#compress-native-libs-dsl
-        // but compressed native libraries yield smaller APK files, following Izzy's policy
+        // but compressed native libraries yield much smaller APK files (for sideloaded builds),
+        // combined with `--split-per-abi` this brings the APK close to the per-device download size
         variant.packaging.jniLibs.useLegacyPackaging = true
     }
 }

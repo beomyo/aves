@@ -14,6 +14,7 @@ import 'package:aves/widgets/filter_grids/places_page.dart';
 import 'package:aves/widgets/filter_grids/tags_page.dart';
 import 'package:aves/widgets/home/home_page.dart';
 import 'package:aves/widgets/settings/settings_page.dart';
+import 'package:aves/widgets/webdav/webdav_server_list_page.dart';
 import 'package:material_ui/material_ui.dart';
 
 class NavigationDisplay {
@@ -55,6 +56,8 @@ class NavigationDisplay {
         return MaterialLocalizations.of(context).searchFieldLabel;
       case SettingsPage.routeName:
         return l10n.settingsPageTitle;
+      case WebDavServerListPage.routeName:
+        return l10n.webdavTitle;
       default:
         return route;
     }
@@ -82,6 +85,8 @@ class NavigationDisplay {
         return AIcons.search;
       case SettingsPage.routeName:
         return AIcons.settings;
+      case WebDavServerListPage.routeName:
+        return AIcons.cloud;
       default:
         return null;
     }

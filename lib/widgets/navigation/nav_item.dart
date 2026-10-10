@@ -18,6 +18,7 @@ import 'package:aves/widgets/navigation/drawer/tile.dart';
 import 'package:aves/widgets/navigation/nav_display.dart';
 import 'package:aves/widgets/search/collection_search_page_route.dart';
 import 'package:aves/widgets/settings/settings_page.dart';
+import 'package:aves/widgets/webdav/webdav_server_list_page.dart';
 import 'package:equatable/equatable.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
@@ -72,6 +73,7 @@ class AvesNavItem extends Equatable {
       case AppDebugPage.routeName:
       case SearchPage.routeName:
       case SettingsPage.routeName:
+      case WebDavServerListPage.routeName:
         return false;
       default:
         return true;
@@ -119,6 +121,8 @@ class AvesNavItem extends Equatable {
         return (_) => ExplorerPage(path: path);
       case SettingsPage.routeName:
         return (_) => const SettingsPage();
+      case WebDavServerListPage.routeName:
+        return (_) => const WebDavServerListPage();
       default:
         throw Exception('unknown route=$route');
     }
