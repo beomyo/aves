@@ -1182,6 +1182,7 @@
   "webdavMediaImages": "Images only",
   "webdavMediaVideos": "Videos only",
   "webdavShowFileNames": "Show file names",
+  "webdavVideoError": "Unable to play this video",
   "webdavJumpToPath": "Jump to path",
   "webdavPathHint": "Folder path, e.g. folder/subfolder",
   "webdavActionGo": "Go"

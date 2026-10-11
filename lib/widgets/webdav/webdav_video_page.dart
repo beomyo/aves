@@ -4,6 +4,7 @@ import 'package:aves/model/entry/entry.dart';
 import 'package:aves/model/settings/settings.dart';
 import 'package:aves/services/common/services.dart';
 import 'package:aves/widgets/common/basic/scaffold.dart';
+import 'package:aves/widgets/common/extensions/build_context.dart';
 import 'package:aves/widgets/viewer/video/db_playback_state_handler.dart';
 import 'package:aves/widgets/viewer/visual/video/video_view.dart';
 import 'package:aves_video/aves_video.dart';
@@ -23,27 +24,49 @@ class WebDavVideoPage extends StatefulWidget {
 }
 
 class _WebDavVideoPageState extends State<WebDavVideoPage> {
-  late final AvesVideoController _controller;
+  AvesVideoController? _controller;
+  StreamSubscription<PlaybackStatus>? _statusSub;
+  PlaybackStatus _status = PlaybackStatus.idle;
   bool _showControls = true;
   Timer? _hideTimer;
 
   @override
   void initState() {
     super.initState();
-    _controller = videoControllerFactory.buildController(
-      widget.entry,
-      playbackStateHandler: DatabasePlaybackStateHandler(),
-      settings: settings,
-    );
-    _controller.play();
-    _scheduleHideControls();
+    _createController();
   }
 
   @override
   void dispose() {
     _hideTimer?.cancel();
-    _controller.dispose();
+    _statusSub?.cancel();
+    _controller?.dispose();
     super.dispose();
+  }
+
+  void _createController() {
+    _statusSub?.cancel();
+    final controller = videoControllerFactory.buildController(
+      widget.entry,
+      playbackStateHandler: DatabasePlaybackStateHandler(),
+      settings: settings,
+    );
+    _controller = controller;
+    _status = PlaybackStatus.idle;
+    _statusSub = controller.statusStream.listen((status) {
+      if (mounted) setState(() => _status = status);
+    });
+    // the player opens the media paused, so wait until it is ready to start
+    controller.untilReady.then((_) {
+      if (mounted && identical(_controller, controller)) controller.play();
+    });
+    _scheduleHideControls();
+  }
+
+  Future<void> _retry() async {
+    final old = _controller;
+    setState(_createController);
+    await old?.dispose();
   }
 
   void _scheduleHideControls() {
@@ -60,7 +83,12 @@ class _WebDavVideoPageState extends State<WebDavVideoPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final title = widget.entry.sourceTitle ?? widget.entry.bestTitle ?? '';
+    final controller = _controller;
+    final hasError = _status == PlaybackStatus.error;
+    final ready = controller?.isReady ?? false;
+
     return AvesScaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -74,16 +102,36 @@ class _WebDavVideoPageState extends State<WebDavVideoPage> {
         onTap: _toggleControls,
         child: ColoredBox(
           color: Colors.black,
-          child: Center(
-            child: VideoView(entry: widget.entry, controller: _controller),
+          child: Stack(
+            children: [
+              if (controller != null) Center(child: VideoView(entry: widget.entry, controller: controller)),
+              if (!ready && !hasError) const Center(child: CircularProgressIndicator()),
+              if (hasError)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(l10n.webdavVideoError, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)),
+                        const SizedBox(height: 16),
+                        OutlinedButton(
+                          onPressed: _retry,
+                          child: Text(l10n.webdavRefresh),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
-      bottomNavigationBar: _showControls ? _buildControls() : null,
+      bottomNavigationBar: _showControls && controller != null ? _buildControls(controller) : null,
     );
   }
 
-  Widget _buildControls() {
+  Widget _buildControls(AvesVideoController controller) {
     return Material(
       color: Colors.black,
       child: SafeArea(
@@ -92,30 +140,30 @@ class _WebDavVideoPageState extends State<WebDavVideoPage> {
           children: [
             Expanded(
               child: StreamBuilder<int>(
-                stream: _controller.positionStream,
+                stream: controller.positionStream,
                 builder: (context, snapshot) {
                   final position = snapshot.data ?? 0;
-                  final duration = _controller.duration;
+                  final duration = controller.duration;
                   return Slider(
                     value: duration > 0 ? (position / duration).clamp(0.0, 1.0) : 0.0,
-                    onChanged: duration > 0 ? (v) => _controller.seekTo((v * duration).round()) : null,
+                    onChanged: duration > 0 ? (v) => controller.seekTo((v * duration).round()) : null,
                   );
                 },
               ),
             ),
             StreamBuilder<PlaybackStatus>(
-              stream: _controller.statusStream,
+              stream: controller.statusStream,
               builder: (context, snapshot) {
-                final playing = _controller.isPlaying;
+                final playing = controller.isPlaying;
                 return IconButton(
                   iconSize: 36,
                   color: Colors.white,
                   icon: Icon(playing ? Icons.pause : Icons.play_arrow),
                   onPressed: () {
                     if (playing) {
-                      _controller.pause();
+                      controller.pause();
                     } else {
-                      _controller.play();
+                      controller.play();
                     }
                     _scheduleHideControls();
                   },

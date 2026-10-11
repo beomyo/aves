@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:aves_model/aves_model.dart';
@@ -207,7 +208,22 @@ class MpvVideoController(
     // cf https://github.com/media-kit/media-kit/issues/1061
 
     await _applyLoop();
-    await _mkPlayer.open(Media(entry.uri), play: playing);
+
+    // some remote sources carry credentials in the URL (e.g. WebDAV):
+    // hand them to the player as an Authorization header, which mpv forwards,
+    // instead of relying on the URL userinfo (not supported by every protocol)
+    var mediaUri = entry.uri;
+    final httpHeaders = <String, String>{};
+    final parsedUri = Uri.tryParse(mediaUri);
+    if (parsedUri != null && parsedUri.userInfo.isNotEmpty) {
+      final parts = parsedUri.userInfo.split(':');
+      final user = Uri.decodeComponent(parts.first);
+      final password = parts.length > 1 ? Uri.decodeComponent(parts.sublist(1).join(':')) : '';
+      httpHeaders['Authorization'] = 'Basic ${base64Encode(utf8.encode('$user:$password'))}';
+      mediaUri = parsedUri.replace(userInfo: '').toString();
+    }
+
+    await _mkPlayer.open(Media(mediaUri, httpHeaders: httpHeaders.isEmpty ? null : httpHeaders), play: playing);
     await _mkPlayer.setSubtitleTrack(SubtitleTrack.no());
     if (startMillis > 0) {
       await seekTo(startMillis);

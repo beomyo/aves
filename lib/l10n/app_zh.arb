@@ -785,6 +785,7 @@
     "webdavMediaImages": "仅图片",
     "webdavMediaVideos": "仅视频",
     "webdavShowFileNames": "显示文件名",
+    "webdavVideoError": "无法播放此视频",
     "webdavJumpToPath": "跳转到路径",
     "webdavPathHint": "文件夹路径，例如 folder/subfolder",
     "webdavActionGo": "跳转"

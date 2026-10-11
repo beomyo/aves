@@ -1012,6 +1012,7 @@
     "webdavMediaImages": "僅圖片",
     "webdavMediaVideos": "僅影片",
     "webdavShowFileNames": "顯示檔名",
+    "webdavVideoError": "無法播放此影片",
     "webdavJumpToPath": "跳至路徑",
     "webdavPathHint": "資料夾路徑，例如 folder/subfolder",
     "webdavActionGo": "跳至"
