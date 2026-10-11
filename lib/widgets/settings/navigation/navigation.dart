@@ -111,6 +111,7 @@ class SettingsTileNavigationHomePage extends SettingsTile {
       const _HomeOption(HomePageSetting.albums),
       const _HomeOption(HomePageSetting.tags),
       const _HomeOption(HomePageSetting.explorer),
+      const _HomeOption(HomePageSetting.webDav),
       if (settings.homeCustomCollection.isNotEmpty) _HomeOption(HomePageSetting.collection, customCollection: settings.homeCustomCollection),
       if (settings.homeCustomExplorerPath != null) _HomeOption(HomePageSetting.explorer, customExplorerPath: settings.homeCustomExplorerPath),
     ],

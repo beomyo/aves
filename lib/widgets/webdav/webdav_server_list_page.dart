@@ -11,7 +11,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 class WebDavServerListPage extends StatelessWidget {
-  static const routeName = '/webdav';
+  static const routeName = '/webdav/servers';
 
   const new({super.key});
 

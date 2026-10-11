@@ -1005,6 +1005,7 @@
     "webdavLayoutMosaic": "馬賽克",
     "webdavRoot": "根目錄",
     "webdavColumnsTitle": "列數",
+    "webdavImmersive": "沉浸式",
     "webdavJumpToPath": "跳至路徑",
     "webdavPathHint": "資料夾路徑，例如 folder/subfolder",
     "webdavActionGo": "跳至"

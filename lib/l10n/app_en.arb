@@ -1175,6 +1175,7 @@
   "webdavLayoutMosaic": "Mosaic",
   "webdavRoot": "Root",
   "webdavColumnsTitle": "Columns",
+  "webdavImmersive": "Immersive",
   "webdavJumpToPath": "Jump to path",
   "webdavPathHint": "Folder path, e.g. folder/subfolder",
   "webdavActionGo": "Go"

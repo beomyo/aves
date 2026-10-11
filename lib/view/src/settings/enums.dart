@@ -100,6 +100,7 @@ extension ExtraHomePageSettingView on HomePageSetting {
       .albums => l10n.drawerAlbumPage,
       .tags => l10n.drawerTagPage,
       .explorer => l10n.explorerPageTitle,
+      .webDav => l10n.webdavTitle,
     };
   }
 }

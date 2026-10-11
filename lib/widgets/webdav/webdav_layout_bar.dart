@@ -11,7 +11,7 @@ import 'package:provider/provider.dart';
 class WebDavLayoutBar extends StatelessWidget {
   static const double preferredHeight = 56;
   static const List<String> layoutValues = ['mosaic', 'grid', 'list'];
-  static const List<int> columnValues = [2, 3, 4, 5, 6];
+  static const List<int> columnValues = [2, 3, 4, 5, 6, 7, 8];
 
   const new({super.key});
 
@@ -30,40 +30,55 @@ class WebDavLayoutBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final layout = context.select<Settings, String>((s) => s.webDavLayout);
-    final columns = context.select<Settings, int>((s) => s.webDavColumns);
-    return Container(
-      height: preferredHeight,
-      padding: const EdgeInsets.only(top: 4, bottom: 8),
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        children: [
-          _chip(
-            context,
-            onPressed: () => _pickLayout(context, layout),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(AIcons.layout),
-                const SizedBox(width: 6),
-                Icon(layoutIcon(layout)),
-              ],
+    final columns = context.select<Settings, double>((s) => s.webDavColumns);
+    final immersive = context.select<Settings, bool>((s) => s.webDavImmersive);
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      child: SizedBox(
+        height: preferredHeight,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          children: [
+            _chip(
+              context,
+              onPressed: () => _pickLayout(context, layout),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(AIcons.layout),
+                  const SizedBox(width: 6),
+                  Icon(layoutIcon(layout)),
+                ],
+              ),
             ),
-          ),
-          _chip(
-            context,
-            enabled: layout == 'grid',
-            onPressed: () => _pickColumns(context, columns),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(AIcons.layoutGrid),
-                const SizedBox(width: 6),
-                Text('$columns'),
-              ],
+            _chip(
+              context,
+              enabled: layout != 'list',
+              onPressed: () => _pickColumns(context, columns),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(AIcons.layoutGrid),
+                  const SizedBox(width: 6),
+                  Text('${columns.round()}'),
+                ],
+              ),
             ),
-          ),
-        ],
+            _chip(
+              context,
+              onPressed: () => settings.webDavImmersive = !immersive,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(immersive ? Icons.fullscreen_exit : Icons.fullscreen, size: 20),
+                  const SizedBox(width: 6),
+                  Text(context.l10n.webdavImmersive),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -98,15 +113,15 @@ class WebDavLayoutBar extends StatelessWidget {
     );
   }
 
-  void _pickColumns(BuildContext context, int current) {
+  void _pickColumns(BuildContext context, double current) {
     showSelectionDialog<int>(
       context: context,
       builder: (context) => AvesSingleSelectionDialog<int>(
-        initialValue: current,
+        initialValue: current.round(),
         options: {for (final n in columnValues) n: '$n'},
         title: context.l10n.webdavColumnsTitle,
       ),
-      onSelection: (value) => settings.webDavColumns = value,
+      onSelection: (value) => settings.webDavColumns = value.toDouble(),
     );
   }
 }

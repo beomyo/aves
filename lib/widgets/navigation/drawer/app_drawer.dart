@@ -32,7 +32,7 @@ import 'package:aves/widgets/navigation/drawer/page_nav_tile.dart';
 import 'package:aves/widgets/navigation/drawer/tile.dart';
 import 'package:aves/widgets/navigation/nav_item.dart';
 import 'package:aves/widgets/settings/settings_page.dart';
-import 'package:aves/widgets/webdav/webdav_server_list_page.dart';
+import 'package:aves/widgets/webdav/webdav_entry_page.dart';
 import 'package:aves_model/aves_model.dart';
 import 'package:aves_utils/aves_utils.dart';
 import 'package:collection/collection.dart';
@@ -123,7 +123,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
       ..._buildTypeLinks(),
       _buildAlbumLinks(context),
       ..._buildPageLinks(context),
-      const PageNavTile(navItem: AvesNavItem(route: WebDavServerListPage.routeName)),
+      const PageNavTile(navItem: AvesNavItem(route: WebDavEntryPage.routeName)),
       if (settings.enableBin) ...[
         const Divider(),
         binTile(context),

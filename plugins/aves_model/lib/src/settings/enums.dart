@@ -14,7 +14,7 @@ enum DisplayRefreshRateMode { auto, highest, lowest }
 
 enum EntryBackground { black, white, checkered }
 
-enum HomePageSetting { collection, albums, tags, explorer }
+enum HomePageSetting { collection, albums, tags, explorer, webDav }
 
 enum KeepScreenOn { never, videoPlayback, viewerOnly, always }
 

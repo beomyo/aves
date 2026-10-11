@@ -12,9 +12,10 @@ mixin WebDavSettings on SettingsAccess {
 
   void removeWebDavServer(String id) => webDavServers = webDavServers.where((v) => v.id != id).toList();
 
-  int get webDavColumns => getInt(SettingKeys.webDavColumnsKey) ?? 3;
+  // fractional so pinch-to-zoom can resize continuously
+  double get webDavColumns => getDouble(SettingKeys.webDavColumnsKey) ?? getInt(SettingKeys.webDavColumnsKey)?.toDouble() ?? 3;
 
-  set webDavColumns(int newValue) => set(SettingKeys.webDavColumnsKey, newValue);
+  set webDavColumns(double newValue) => set(SettingKeys.webDavColumnsKey, newValue);
 
   // one of `grid`, `list`, `mosaic`
   String get webDavLayout => getString(SettingKeys.webDavLayoutKey) ?? 'grid';
@@ -24,4 +25,19 @@ mixin WebDavSettings on SettingsAccess {
   bool get webDavLayoutBar => getBool(SettingKeys.webDavLayoutBarKey) ?? true;
 
   set webDavLayoutBar(bool newValue) => set(SettingKeys.webDavLayoutBarKey, newValue);
+
+  // hide the app bar, address bar and layout bar while scrolling down
+  bool get webDavImmersive => getBool(SettingKeys.webDavImmersiveKey) ?? true;
+
+  set webDavImmersive(bool newValue) => set(SettingKeys.webDavImmersiveKey, newValue);
+
+  // last opened location, to restore the page on the next launch
+  String? get webDavLastServerId => getString(SettingKeys.webDavLastServerIdKey);
+
+  String? get webDavLastUrl => getString(SettingKeys.webDavLastUrlKey);
+
+  void setWebDavLastLocation(String? serverId, String? url) {
+    set(SettingKeys.webDavLastServerIdKey, serverId);
+    set(SettingKeys.webDavLastUrlKey, url);
+  }
 }

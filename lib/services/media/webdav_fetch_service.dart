@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:aves/image_providers/region_provider.dart';
@@ -16,6 +17,12 @@ import 'package:flutter/painting.dart';
 bool isRemoteUri(String uri) => uri.startsWith('http://') || uri.startsWith('https://');
 
 class WebDavImageLoader {
+  // hard caps on the decoded dimensions: remote files can be enormous, and
+  // decoding several of them at native resolution is what used to OOM
+  static const int _maxThumbnailDim = 1024;
+  static const int _minFullImageDim = 1024;
+  static const int _maxFullImageDim = 3072;
+
   final Map<String, double> _aspectCache = {};
 
   Future<Uint8List> bytesFor(String url) async {
@@ -31,6 +38,26 @@ class WebDavImageLoader {
       await webDavDiskCache.put(url, bytes);
     }
     return bytes;
+  }
+
+  // decodes while bounding the longest side to `maxDim` (never upscaling),
+  // so memory stays proportional to the tile/screen size instead of the file
+  static Future<ui.Codec> _decodeBounded(Uint8List bytes, ImageDecoderCallback decode, int maxDim) async {
+    final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+    return decode(
+      buffer,
+      getTargetSize: (intrinsicWidth, intrinsicHeight) {
+        final longest = math.max(intrinsicWidth, intrinsicHeight);
+        if (longest <= maxDim || longest == 0) {
+          return const ui.TargetImageSize();
+        }
+        final scale = maxDim / longest;
+        return ui.TargetImageSize(
+          width: math.max(1, (intrinsicWidth * scale).round()),
+          height: math.max(1, (intrinsicHeight * scale).round()),
+        );
+      },
+    );
   }
 
   // aspect ratio (width / height) parsed from the image header,
@@ -74,18 +101,13 @@ class WebDavImageLoader {
   ) {
     final extent = request.extent;
     final devicePixelRatio = ui.PlatformDispatcher.instance.views.firstOrNull?.devicePixelRatio ?? 1.0;
-    final target = extent > 0 ? (extent * devicePixelRatio).round() : null;
+    final requested = extent > 0 ? (extent * devicePixelRatio).round() : 256;
+    // cap the thumbnail size so a huge mosaic tile cannot decode a huge bitmap
+    final maxDim = requested.clamp(1, _maxThumbnailDim);
     return servicePolicy.call(
       () async {
         final bytes = await bytesFor(request.uri);
-        // decode at the requested size to avoid holding full-resolution
-        // bitmaps for every grid tile
-        return ui.instantiateImageCodec(
-          bytes,
-          targetWidth: target,
-          targetHeight: target,
-          allowUpscaling: false,
-        );
+        return _decodeBounded(bytes, _decoderFor(decode), maxDim);
       },
       priority: priority ?? (extent == 0 ? ServiceCallPriority.getFastThumbnail : ServiceCallPriority.getSizedThumbnail),
       key: taskKey,
@@ -96,14 +118,25 @@ class WebDavImageLoader {
     ImageRequest request,
     ImageDecoderCallback decode,
   ) {
+    final view = ui.PlatformDispatcher.instance.views.firstOrNull;
+    // decode at roughly the screen size, allowing a little zoom headroom,
+    // instead of at the file's native resolution
+    final longSide = view == null ? _minFullImageDim : math.max(view.physicalSize.width, view.physicalSize.height).round();
+    final maxDim = (longSide * 1.25).round().clamp(_minFullImageDim, _maxFullImageDim);
     return servicePolicy.call(
       () async {
         final bytes = await bytesFor(request.uri);
-        final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
-        return decode(buffer);
+        return _decodeBounded(bytes, decode, maxDim);
       },
       priority: ServiceCallPriority.normal,
     );
+  }
+
+  // the framework provides a decoder for sized thumbnails; fall back to
+  // `instantiateImageCodec` when it is missing
+  static ImageDecoderCallback _decoderFor(ImageDecoderCallback? decode) {
+    if (decode != null) return decode;
+    throw UnreportedStateError('missing decoder for webdav thumbnail');
   }
 }
 

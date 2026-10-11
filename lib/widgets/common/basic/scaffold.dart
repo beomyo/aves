@@ -10,6 +10,7 @@ class const AvesScaffold({
   final Color? backgroundColor,
   final bool? resizeToAvoidBottomInset,
   final bool extendBody = false,
+  final bool extendBodyBehindAppBar = false,
 }) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -26,6 +27,7 @@ class const AvesScaffold({
         backgroundColor: backgroundColor,
         resizeToAvoidBottomInset: resizeToAvoidBottomInset,
         extendBody: extendBody,
+        extendBodyBehindAppBar: extendBodyBehindAppBar,
         drawerEnableOpenDragGesture: drawerEnableOpenDragGesture,
       ),
     );

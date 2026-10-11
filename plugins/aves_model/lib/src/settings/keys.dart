@@ -171,6 +171,9 @@ class SettingKeys {
   static const webDavColumnsKey = 'webdav_columns';
   static const webDavLayoutKey = 'webdav_layout';
   static const webDavLayoutBarKey = 'webdav_layout_bar';
+  static const webDavImmersiveKey = 'webdav_immersive';
+  static const webDavLastServerIdKey = 'webdav_last_server_id';
+  static const webDavLastUrlKey = 'webdav_last_url';
 
   // accessibility
   static const showPinchGestureAlternativesKey = 'show_pinch_gesture_alternatives';
