@@ -19,7 +19,6 @@ import 'package:aves/widgets/common/identity/empty.dart';
 import 'package:aves/widgets/common/identity/scroll_thumb.dart';
 import 'package:aves/widgets/common/thumbnail/image.dart';
 import 'package:aves/widgets/navigation/drawer/app_drawer.dart';
-import 'package:aves/widgets/webdav/webdav_server_list_page.dart';
 import 'package:aves/widgets/webdav/webdav_video_page.dart';
 import 'package:aves/widgets/webdav/webdav_view_options.dart';
 import 'package:aves/widgets/webdav/webdav_viewer_page.dart';
@@ -412,16 +411,6 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     );
   }
 
-  void _openServers() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        settings: const RouteSettings(name: WebDavServerListPage.routeName),
-        builder: (context) => const WebDavServerListPage(),
-      ),
-    );
-  }
-
   Future<void> _promptJump() async {
     final l10n = context.l10n;
     final base = _baseUrl;
@@ -498,7 +487,6 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
       'video' => media.where((e) => e.isVideo).toList(),
       _ => media,
     };
-    final isEmpty = state != _LoadState.ready || (folders.isEmpty && visible.isEmpty);
 
     final List<Widget> contentSlivers;
     if (state == _LoadState.loading) {
@@ -561,13 +549,16 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
           child: Text(_folderName, style: const TextStyle(color: Colors.black87)),
         ),
         crumbTextBuilder: (label) => const SizedBox.shrink(),
-        child: CustomScrollView(
-          controller: _scrollController,
-          physics: isEmpty ? const NeverScrollableScrollPhysics() : null,
-          slivers: [
-            _buildAppBar(context, immersiveEnabled),
-            ...contentSlivers,
-          ],
+        child: RefreshIndicator(
+          onRefresh: _fetch,
+          child: CustomScrollView(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              _buildAppBar(context, immersiveEnabled),
+              ...contentSlivers,
+            ],
+          ),
         ),
       ),
     );
@@ -592,16 +583,6 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
           tooltip: context.l10n.webdavViewOptions,
           icon: const Icon(AIcons.layout),
           onPressed: () => showWebDavViewOptions(context),
-        ),
-        IconButton(
-          tooltip: context.l10n.webdavServersPageTitle,
-          icon: const Icon(AIcons.cloud),
-          onPressed: _openServers,
-        ),
-        IconButton(
-          tooltip: context.l10n.webdavRefresh,
-          onPressed: _fetch,
-          icon: const Icon(AIcons.refresh),
         ),
       ],
       bottom: PreferredSize(
