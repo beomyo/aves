@@ -779,6 +779,12 @@
     "webdavRoot": "根目录",
     "webdavColumnsTitle": "列数",
     "webdavImmersive": "沉浸式",
+    "webdavViewOptions": "视图",
+    "webdavMediaType": "媒体类型",
+    "webdavMediaAll": "全部",
+    "webdavMediaImages": "仅图片",
+    "webdavMediaVideos": "仅视频",
+    "webdavShowFileNames": "显示文件名",
     "webdavJumpToPath": "跳转到路径",
     "webdavPathHint": "文件夹路径，例如 folder/subfolder",
     "webdavActionGo": "跳转"

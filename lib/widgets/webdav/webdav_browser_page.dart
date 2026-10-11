@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:aves/model/entry/entry.dart';
+import 'package:aves/model/entry/extensions/props.dart';
 import 'package:aves/model/entry/origins.dart';
 import 'package:aves/model/settings/settings.dart';
 import 'package:aves/model/source/webdav/webdav_resource.dart';
 import 'package:aves/model/source/webdav/webdav_server.dart';
+import 'package:aves/ref/mime_types.dart';
 import 'package:aves/services/common/webdav_registry.dart';
 import 'package:aves/services/media/webdav_fetch_service.dart';
 import 'package:aves/theme/icons.dart';
@@ -17,8 +19,9 @@ import 'package:aves/widgets/common/identity/empty.dart';
 import 'package:aves/widgets/common/identity/scroll_thumb.dart';
 import 'package:aves/widgets/common/thumbnail/image.dart';
 import 'package:aves/widgets/navigation/drawer/app_drawer.dart';
-import 'package:aves/widgets/webdav/webdav_layout_bar.dart';
 import 'package:aves/widgets/webdav/webdav_server_list_page.dart';
+import 'package:aves/widgets/webdav/webdav_video_page.dart';
+import 'package:aves/widgets/webdav/webdav_view_options.dart';
 import 'package:aves/widgets/webdav/webdav_viewer_page.dart';
 import 'package:aves_model/aves_model.dart';
 import 'package:material_ui/material_ui.dart';
@@ -47,7 +50,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
   final ValueNotifier<_LoadState> _state = ValueNotifier(_LoadState.loading);
   final ValueNotifier<String> _error = ValueNotifier('');
   final ValueNotifier<List<WebDavResource>> _folders = ValueNotifier([]);
-  final ValueNotifier<List<AvesEntry>> _images = ValueNotifier([]);
+  final ValueNotifier<List<AvesEntry>> _media = ValueNotifier([]);
   final ValueNotifier<bool> _isScrolling = ValueNotifier(false);
   final ScrollController _scrollController = ScrollController();
   final ScrollController _addressScrollController = ScrollController();
@@ -60,7 +63,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
   // scroll position per folder, to restore it when going back
   final Map<String, double> _scrollPositions = {};
 
-  // immersive: hide the bottom layout bar while scrolling down
+  // immersive: hide the app bar while scrolling down
   bool _immersive = false;
   double _lastScrollPixels = 0;
 
@@ -82,7 +85,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     _scrollController.addListener(_onScroll);
     _settingsSub = settings.updateStream.where((event) => event.key == SettingKeys.webDavLayoutKey).listen((_) {
       if (settings.webDavLayout == 'mosaic') {
-        _maybeProbe(_images.value, 'mosaic');
+        _maybeProbe(_media.value, 'mosaic');
       }
     });
     _fetch();
@@ -99,7 +102,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     _state.dispose();
     _error.dispose();
     _folders.dispose();
-    _images.dispose();
+    _media.dispose();
     _isScrolling.dispose();
     super.dispose();
   }
@@ -121,7 +124,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     final pixels = _scrollController.position.pixels;
     final delta = pixels - _lastScrollPixels;
     _lastScrollPixels = pixels;
-    // scrolling up reveals the bars, scrolling down hides them
+    // scrolling up reveals the app bar, scrolling down hides it
     final shouldBeImmersive = delta > 0 ? (_immersive || pixels > 24) : false;
     if (shouldBeImmersive != _immersive) {
       setState(() => _immersive = shouldBeImmersive);
@@ -224,7 +227,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     final url = _currentUrl;
     _state.value = _LoadState.loading;
     _folders.value = [];
-    _images.value = [];
+    _media.value = [];
     _probeGeneration++;
     try {
       final client = webDavRegistry.clientForServer(widget.server);
@@ -235,15 +238,17 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
       if (!mounted || url != _currentUrl) return;
 
       final folders = resources.where((r) => r.isCollection).toList();
-      final images = resources.where((r) => r.isImage || _looksLikeImage(r)).toList();
-
-      final entries = <AvesEntry>[];
-      for (var i = 0; i < images.length; i++) {
-        entries.add(_entryFromResource(images[i], -1 - i));
+      final media = <AvesEntry>[];
+      var index = 0;
+      for (final resource in resources.where((r) => !r.isCollection)) {
+        final mime = _mimeForResource(resource);
+        if (!MimeTypes.isImage(mime) && !MimeTypes.isVideo(mime)) continue;
+        media.add(_entryFromResource(resource, mime, -1 - index));
+        index++;
       }
 
       _folders.value = folders;
-      _images.value = entries;
+      _media.value = media;
       _state.value = _LoadState.ready;
 
       if (settings.webDavLastServerId != widget.server.id || settings.webDavLastUrl != url) {
@@ -256,7 +261,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
           _addressScrollController.jumpTo(_addressScrollController.position.maxScrollExtent);
         }
       });
-      _maybeProbe(entries, settings.webDavLayout);
+      _maybeProbe(media, settings.webDavLayout);
     } catch (error) {
       if (!mounted || url != _currentUrl) return;
       _error.value = error.toString();
@@ -264,11 +269,12 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     }
   }
 
-  void _maybeProbe(List<AvesEntry> images, String layout) {
+  void _maybeProbe(List<AvesEntry> media, String layout) {
     if (layout != 'mosaic') return;
     final generation = ++_probeGeneration;
     final pending = <String>[];
-    for (final entry in images) {
+    for (final entry in media) {
+      if (!entry.isImage) continue;
       if (_aspects.containsKey(entry.uri)) continue;
       pending.add(entry.uri);
       if (pending.length >= _maxProbeCount) break;
@@ -302,7 +308,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     });
   }
 
-  double _aspectOf(AvesEntry entry) => (_aspects[entry.uri] ?? 1.0).clamp(0.35, 2.6);
+  double _aspectOf(AvesEntry entry) => (entry.isVideo ? 16 / 9 : (_aspects[entry.uri] ?? 1.0)).clamp(0.35, 2.6);
 
   void _onScaleStart(ScaleStartDetails details) {
     _scaleStartColumns = settings.webDavColumns;
@@ -318,14 +324,16 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     }
   }
 
-  AvesEntry _entryFromResource(WebDavResource resource, int id) {
+  AvesEntry _entryFromResource(WebDavResource resource, String mimeType, int id) {
     return AvesEntry(
       id: id,
       uri: resource.url,
-      path: Uri.parse(resource.url).path,
+      // remote entries have no local path, which also keeps the video backend
+      // from looking for sibling subtitle files on disk
+      path: null,
       contentId: null,
       pageId: null,
-      sourceMimeType: resource.mimeType ?? _mimeFromName(resource.name),
+      sourceMimeType: mimeType,
       width: 0,
       height: 0,
       sourceRotationDegrees: 0,
@@ -340,13 +348,14 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     );
   }
 
-  static bool _looksLikeImage(WebDavResource resource) {
-    if (resource.isCollection) return false;
-    final name = resource.name.toLowerCase();
-    return _imageExtensions.any(name.endsWith);
+  static String _mimeForResource(WebDavResource resource) {
+    if (resource.isCollection) return 'application/octet-stream';
+    final reported = resource.mimeType;
+    if (reported != null && (MimeTypes.isImage(reported) || MimeTypes.isVideo(reported))) {
+      return reported;
+    }
+    return _mimeFromName(resource.name);
   }
-
-  static const _imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic', '.heif', '.avif', '.svg', '.tif', '.tiff'];
 
   static String _mimeFromName(String name) {
     final lower = name.toLowerCase();
@@ -359,19 +368,46 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     if (lower.endsWith('.avif')) return 'image/avif';
     if (lower.endsWith('.svg')) return 'image/svg+xml';
     if (lower.endsWith('.tif') || lower.endsWith('.tiff')) return 'image/tiff';
+    if (lower.endsWith('.mp4') || lower.endsWith('.m4v')) return 'video/mp4';
+    if (lower.endsWith('.mkv')) return 'video/x-matroska';
+    if (lower.endsWith('.webm')) return 'video/webm';
+    if (lower.endsWith('.mov')) return 'video/quicktime';
+    if (lower.endsWith('.avi')) return 'video/x-msvideo';
+    if (lower.endsWith('.wmv')) return 'video/x-ms-wmv';
+    if (lower.endsWith('.flv')) return 'video/x-flv';
+    if (lower.endsWith('.ts') || lower.endsWith('.m2ts')) return 'video/mp2t';
+    if (lower.endsWith('.mpg') || lower.endsWith('.mpeg')) return 'video/mpeg';
+    if (lower.endsWith('.3gp')) return 'video/3gpp';
+    if (lower.endsWith('.3g2')) return 'video/3gpp2';
+    if (lower.endsWith('.ogv')) return 'video/ogg';
     return 'application/octet-stream';
   }
 
   void _openFolder(WebDavResource folder) => _navigateTo(folder.url);
 
-  void _openViewer(int index) {
-    final entries = _images.value;
-    if (entries.isEmpty) return;
+  void _openEntry(List<AvesEntry> visibleEntries, AvesEntry entry) {
+    if (entry.isVideo) {
+      // the video backend streams the file itself, so give it an authenticated URL
+      final playableUrl = webDavRegistry.authenticatedUrl(entry.uri);
+      final playableEntry = playableUrl == entry.uri ? entry : entry.copyWith(uri: playableUrl);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          settings: const RouteSettings(name: WebDavVideoPage.routeName),
+          builder: (context) => WebDavVideoPage(entry: playableEntry),
+        ),
+      );
+      return;
+    }
+    final index = visibleEntries.indexOf(entry);
+    final images = visibleEntries.where((e) => e.isImage).toList();
+    final imageIndex = images.indexOf(entry);
+    if (index < 0 || images.isEmpty || imageIndex < 0) return;
     Navigator.push(
       context,
       MaterialPageRoute(
         settings: const RouteSettings(name: WebDavViewerPage.routeName),
-        builder: (context) => WebDavViewerPage(entries: entries, initialIndex: index),
+        builder: (context) => WebDavViewerPage(entries: images, initialIndex: imageIndex),
       ),
     );
   }
@@ -423,10 +459,6 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
 
   @override
   Widget build(BuildContext context) {
-    final showLayoutBar = context.select<Settings, bool>((s) => s.webDavLayoutBar);
-    final immersiveEnabled = context.select<Settings, bool>((s) => s.webDavImmersive);
-    final barVisible = !(immersiveEnabled && _immersive);
-
     return PopScope(
       canPop: _history.isEmpty,
       onPopInvokedWithResult: (didPop, result) {
@@ -434,14 +466,6 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
       },
       child: AvesScaffold(
         drawer: const AppDrawer(),
-        bottomNavigationBar: !showLayoutBar
-            ? null
-            : AnimatedSize(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeOut,
-                alignment: Alignment.topCenter,
-                child: barVisible ? const WebDavLayoutBar() : const SizedBox(width: double.infinity),
-              ),
         body: ValueListenableBuilder<_LoadState>(
           valueListenable: _state,
           builder: (context, state, child) {
@@ -449,8 +473,8 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
               valueListenable: _folders,
               builder: (context, folders, child) {
                 return ValueListenableBuilder<List<AvesEntry>>(
-                  valueListenable: _images,
-                  builder: (context, images, child) => _buildScrollView(context, state: state, folders: folders, images: images),
+                  valueListenable: _media,
+                  builder: (context, media, child) => _buildScrollView(context, state: state, folders: folders, media: media),
                 );
               },
             );
@@ -460,14 +484,21 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     );
   }
 
-  Widget _buildScrollView(BuildContext context, {required _LoadState state, required List<WebDavResource> folders, required List<AvesEntry> images}) {
+  Widget _buildScrollView(BuildContext context, {required _LoadState state, required List<WebDavResource> folders, required List<AvesEntry> media}) {
     final layout = context.select<Settings, String>((s) => s.webDavLayout);
     final columns = context.select<Settings, double>((s) => s.webDavColumns);
+    final mediaFilter = context.select<Settings, String>((s) => s.webDavMediaFilter);
+    final showNames = context.select<Settings, bool>((s) => s.webDavShowNames);
     final immersiveEnabled = context.select<Settings, bool>((s) => s.webDavImmersive);
     final topInset = MediaQuery.paddingOf(context).top;
     final headerHeight = topInset + kToolbarHeight + WebDavBrowserPage.addressBarHeight;
 
-    final isEmpty = state != _LoadState.ready || (folders.isEmpty && images.isEmpty);
+    final visible = switch (mediaFilter) {
+      'image' => media.where((e) => e.isImage).toList(),
+      'video' => media.where((e) => e.isVideo).toList(),
+      _ => media,
+    };
+    final isEmpty = state != _LoadState.ready || (folders.isEmpty && visible.isEmpty);
 
     final List<Widget> contentSlivers;
     if (state == _LoadState.loading) {
@@ -489,18 +520,18 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
           ),
         ),
       ];
-    } else if (folders.isEmpty && images.isEmpty) {
+    } else if (folders.isEmpty && visible.isEmpty) {
       contentSlivers = [SliverFillRemaining(hasScrollBody: false, child: EmptyContent(icon: AIcons.folder, text: context.l10n.webdavEmptyFolder))];
     } else {
       contentSlivers = [
         if (folders.isNotEmpty) _buildFolderSliver(context, folders),
-        if (images.isNotEmpty)
+        if (visible.isNotEmpty)
           if (layout == 'mosaic')
-            ..._buildMosaicSlivers(context, images, columns)
+            ..._buildMosaicSlivers(context, visible, columns, showNames)
           else if (layout == 'list')
-            _buildListSliver(context, images)
+            _buildListSliver(context, visible, showNames)
           else
-            _buildGridSliver(context, images, columns),
+            _buildGridSliver(context, visible, columns, showNames),
         const SliverToBoxAdapter(child: SizedBox(height: 8)),
       ];
     }
@@ -532,7 +563,6 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
         crumbTextBuilder: (label) => const SizedBox.shrink(),
         child: CustomScrollView(
           controller: _scrollController,
-          // prevent scrolling the app bar away when there is nothing to scroll
           physics: isEmpty ? const NeverScrollableScrollPhysics() : null,
           slivers: [
             _buildAppBar(context, immersiveEnabled),
@@ -544,7 +574,6 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
   }
 
   Widget _buildAppBar(BuildContext context, bool immersiveEnabled) {
-    final l10n = context.l10n;
     return SliverAppBar(
       primary: true,
       pinned: !immersiveEnabled,
@@ -560,17 +589,17 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
       title: Text(_folderName, maxLines: 1, overflow: TextOverflow.ellipsis),
       actions: [
         IconButton(
-          tooltip: l10n.webdavLayout,
+          tooltip: context.l10n.webdavViewOptions,
           icon: const Icon(AIcons.layout),
-          onPressed: () => settings.webDavLayoutBar = !settings.webDavLayoutBar,
+          onPressed: () => showWebDavViewOptions(context),
         ),
         IconButton(
-          tooltip: l10n.webdavServersPageTitle,
+          tooltip: context.l10n.webdavServersPageTitle,
           icon: const Icon(AIcons.cloud),
           onPressed: _openServers,
         ),
         IconButton(
-          tooltip: l10n.webdavRefresh,
+          tooltip: context.l10n.webdavRefresh,
           onPressed: _fetch,
           icon: const Icon(AIcons.refresh),
         ),
@@ -657,32 +686,35 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     );
   }
 
-  Widget _buildListSliver(BuildContext context, List<AvesEntry> images) {
+  Widget _buildListSliver(BuildContext context, List<AvesEntry> entries, bool showNames) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
     return SliverList.builder(
-      itemCount: images.length,
+      itemCount: entries.length,
       itemBuilder: (context, index) {
-        final entry = images[index];
+        final entry = entries[index];
         return ListTile(
           leading: SizedBox(
             width: 56,
             height: 56,
-            child: ThumbnailImage(
-              entry: entry,
-              extent: 56,
-              devicePixelRatio: dpr,
-              fit: BoxFit.cover,
-              cancellableNotifier: _isScrolling,
-            ),
+            child: entry.isVideo
+                ? const _VideoPlaceholder()
+                : ThumbnailImage(
+                    entry: entry,
+                    extent: 56,
+                    devicePixelRatio: dpr,
+                    fit: BoxFit.cover,
+                    cancellableNotifier: _isScrolling,
+                  ),
           ),
           title: Text(entry.sourceTitle ?? entry.bestTitle ?? ''),
-          onTap: () => _openViewer(index),
+          trailing: entry.isVideo ? const Icon(Icons.play_circle_outline, size: 20) : null,
+          onTap: () => _openEntry(entries, entry),
         );
       },
     );
   }
 
-  Widget _buildGridSliver(BuildContext context, List<AvesEntry> images, double columns) {
+  Widget _buildGridSliver(BuildContext context, List<AvesEntry> entries, double columns, bool showNames) {
     final crossAxisCount = columns.round().clamp(1, 10);
     final width = MediaQuery.sizeOf(context).width;
     final dpr = MediaQuery.devicePixelRatioOf(context);
@@ -694,23 +726,24 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
           mainAxisSpacing: 4,
           crossAxisSpacing: 4,
         ),
-        itemCount: images.length,
+        itemCount: entries.length,
         itemBuilder: (context, index) {
-          final entry = images[index];
-          return _WebDavImageTile(
+          final entry = entries[index];
+          return _WebDavTile(
             key: ValueKey(entry.uri),
             entry: entry,
             extent: width / crossAxisCount,
             devicePixelRatio: dpr,
             cancellableNotifier: _isScrolling,
-            onTap: () => _openViewer(index),
+            showName: showNames,
+            onTap: () => _openEntry(entries, entry),
           );
         },
       ),
     );
   }
 
-  List<Widget> _buildMosaicSlivers(BuildContext context, List<AvesEntry> images, double columns) {
+  List<Widget> _buildMosaicSlivers(BuildContext context, List<AvesEntry> entries, double columns, bool showNames) {
     const spacing = _mosaicSpacing;
     final width = MediaQuery.sizeOf(context).width;
     final dpr = MediaQuery.devicePixelRatioOf(context);
@@ -729,8 +762,8 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
       aspectSum = 0;
     }
 
-    for (var i = 0; i < images.length; i++) {
-      final aspect = _aspectOf(images[i]);
+    for (var i = 0; i < entries.length; i++) {
+      final aspect = _aspectOf(entries[i]);
       final nextCount = items.length + 1;
       final nextWidth = (aspectSum + aspect) * targetHeight + spacing * (nextCount - 1);
       if (items.isNotEmpty && nextWidth > contentWidth) {
@@ -756,16 +789,17 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
                   for (var k = 0; k < indices.length; k++) ...[
                     if (k > 0) const SizedBox(width: spacing),
                     SizedBox(
-                      width: _aspectOf(images[indices[k]]) * height,
+                      width: _aspectOf(entries[indices[k]]) * height,
                       height: height,
-                      child: _WebDavImageTile(
-                        key: ValueKey(images[indices[k]].uri),
-                        entry: images[indices[k]],
-                        extent: math.max(_aspectOf(images[indices[k]]) * height, 48),
+                      child: _WebDavTile(
+                        key: ValueKey(entries[indices[k]].uri),
+                        entry: entries[indices[k]],
+                        extent: math.max(_aspectOf(entries[indices[k]]) * height, 48),
                         devicePixelRatio: dpr,
                         cancellableNotifier: _isScrolling,
+                        showName: showNames,
                         isMosaic: true,
-                        onTap: () => _openViewer(indices[k]),
+                        onTap: () => _openEntry(entries, entries[indices[k]]),
                       ),
                     ),
                   ],
@@ -779,12 +813,27 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
   }
 }
 
-class _WebDavImageTile extends StatelessWidget {
+class _VideoPlaceholder extends StatelessWidget {
+  const new();
+
+  @override
+  Widget build(BuildContext context) {
+    return const ColoredBox(
+      color: Color(0x33000000),
+      child: Center(
+        child: Icon(Icons.play_circle_outline, color: Colors.white, size: 32),
+      ),
+    );
+  }
+}
+
+class _WebDavTile extends StatelessWidget {
   final AvesEntry entry;
   final double extent;
   final double devicePixelRatio;
   final ValueNotifier<bool> cancellableNotifier;
   final bool isMosaic;
+  final bool showName;
   final VoidCallback onTap;
 
   const new({
@@ -795,21 +844,50 @@ class _WebDavImageTile extends StatelessWidget {
     required this.cancellableNotifier,
     required this.onTap,
     this.isMosaic = false,
+    this.showName = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: ThumbnailImage(
-        entry: entry,
-        extent: extent,
-        devicePixelRatio: devicePixelRatio,
-        fit: BoxFit.cover,
-        isMosaic: isMosaic,
-        cancellableNotifier: cancellableNotifier,
-        heroTag: null,
-      ),
-    );
+    Widget content = entry.isVideo
+        ? const _VideoPlaceholder()
+        : ThumbnailImage(
+            entry: entry,
+            extent: extent,
+            devicePixelRatio: devicePixelRatio,
+            fit: BoxFit.cover,
+            isMosaic: isMosaic,
+            cancellableNotifier: cancellableNotifier,
+            heroTag: null,
+          );
+    if (showName) {
+      content = Stack(
+        fit: StackFit.expand,
+        children: [
+          content,
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(4, 8, 4, 3),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Colors.black87],
+                ),
+              ),
+              child: Text(
+                entry.sourceTitle ?? entry.bestTitle ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white, fontSize: 11),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    return InkWell(onTap: onTap, child: content);
   }
 }

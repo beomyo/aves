@@ -22,9 +22,14 @@ mixin WebDavSettings on SettingsAccess {
 
   set webDavLayout(String newValue) => set(SettingKeys.webDavLayoutKey, newValue);
 
-  bool get webDavLayoutBar => getBool(SettingKeys.webDavLayoutBarKey) ?? true;
+  // one of `all`, `image`, `video`
+  String get webDavMediaFilter => getString(SettingKeys.webDavMediaFilterKey) ?? 'all';
 
-  set webDavLayoutBar(bool newValue) => set(SettingKeys.webDavLayoutBarKey, newValue);
+  set webDavMediaFilter(String newValue) => set(SettingKeys.webDavMediaFilterKey, newValue);
+
+  bool get webDavShowNames => getBool(SettingKeys.webDavShowNamesKey) ?? false;
+
+  set webDavShowNames(bool newValue) => set(SettingKeys.webDavShowNamesKey, newValue);
 
   // hide the app bar, address bar and layout bar while scrolling down
   bool get webDavImmersive => getBool(SettingKeys.webDavImmersiveKey) ?? true;

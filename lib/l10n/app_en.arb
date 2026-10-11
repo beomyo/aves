@@ -1176,6 +1176,12 @@
   "webdavRoot": "Root",
   "webdavColumnsTitle": "Columns",
   "webdavImmersive": "Immersive",
+  "webdavViewOptions": "View",
+  "webdavMediaType": "Media type",
+  "webdavMediaAll": "All",
+  "webdavMediaImages": "Images only",
+  "webdavMediaVideos": "Videos only",
+  "webdavShowFileNames": "Show file names",
   "webdavJumpToPath": "Jump to path",
   "webdavPathHint": "Folder path, e.g. folder/subfolder",
   "webdavActionGo": "Go"

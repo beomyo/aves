@@ -170,7 +170,8 @@ class SettingKeys {
   static const webDavServersKey = 'webdav_servers';
   static const webDavColumnsKey = 'webdav_columns';
   static const webDavLayoutKey = 'webdav_layout';
-  static const webDavLayoutBarKey = 'webdav_layout_bar';
+  static const webDavMediaFilterKey = 'webdav_media_filter';
+  static const webDavShowNamesKey = 'webdav_show_names';
   static const webDavImmersiveKey = 'webdav_immersive';
   static const webDavLastServerIdKey = 'webdav_last_server_id';
   static const webDavLastUrlKey = 'webdav_last_url';

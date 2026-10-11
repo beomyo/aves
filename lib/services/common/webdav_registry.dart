@@ -23,6 +23,16 @@ class WebDavRegistry {
 
   WebDavClient? clientForUrl(String url) => clientForServer(serverForUrl(url));
 
+  // for consumers we do not control (e.g. the video backend streaming the file
+  // itself), embed the credentials in the URL when the server needs auth
+  String authenticatedUrl(String url) {
+    final server = serverForUrl(url);
+    if (server == null || server.username.isEmpty) return url;
+    final uri = Uri.parse(url);
+    if (uri.userInfo.isNotEmpty) return url;
+    return uri.replace(userInfo: '${Uri.encodeComponent(server.username)}:${Uri.encodeComponent(server.password)}').toString();
+  }
+
   WebDavClient? clientForServer(WebDavServer? server) {
     if (server == null) return null;
     final cached = _clients[server.id];
