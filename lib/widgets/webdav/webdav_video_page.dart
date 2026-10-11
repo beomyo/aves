@@ -11,6 +11,7 @@ import 'package:aves/widgets/viewer/video/db_playback_state_handler.dart';
 import 'package:aves/widgets/viewer/visual/video/video_view.dart';
 import 'package:aves_video/aves_video.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 // Minimal video player for remote (WebDAV) entries, reusing Aves' video stack.
@@ -51,7 +52,14 @@ class _WebDavVideoPageState extends State<WebDavVideoPage> {
     _position.dispose();
     _setKeepScreenOn(false);
     _controller?.dispose();
+    // restore the default (unspecified) orientation
+    SystemChrome.setPreferredOrientations(const []);
     super.dispose();
+  }
+
+  void _setOrientation(List<DeviceOrientation> orientations) {
+    SystemChrome.setPreferredOrientations(orientations);
+    _scheduleHideControls();
   }
 
   void _createController() {
@@ -196,6 +204,18 @@ class _WebDavVideoPageState extends State<WebDavVideoPage> {
                       if (subtitle != null) Text(subtitle, style: const TextStyle(color: Colors.white70, fontSize: 12)),
                     ],
                   ),
+                ),
+                IconButton(
+                  tooltip: context.l10n.webdavOrientationPortrait,
+                  icon: const Icon(Icons.stay_current_portrait),
+                  color: Colors.white,
+                  onPressed: () => _setOrientation(const [DeviceOrientation.portraitUp]),
+                ),
+                IconButton(
+                  tooltip: context.l10n.webdavOrientationLandscape,
+                  icon: const Icon(Icons.stay_current_landscape),
+                  color: Colors.white,
+                  onPressed: () => _setOrientation(const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]),
                 ),
               ],
             ),

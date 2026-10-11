@@ -223,6 +223,18 @@ class MpvVideoController(
       mediaUri = parsedUri.replace(userInfo: '').toString();
     }
 
+    // network streams: favour a fast start over deep buffering
+    if (parsedUri != null && (parsedUri.scheme == 'http' || parsedUri.scheme == 'https')) {
+      final platform = _mkPlayer.platform;
+      if (platform is NativePlayer) {
+        await platform.setProperty('cache', 'yes');
+        await platform.setProperty('cache-pause-initial', 'no');
+        await platform.setProperty('demuxer-readahead-secs', '3');
+        await platform.setProperty('demuxer-max-bytes', '${64 * 1024 * 1024}');
+        await platform.setProperty('network-timeout', '30');
+      }
+    }
+
     await _mkPlayer.open(Media(mediaUri, httpHeaders: httpHeaders.isEmpty ? null : httpHeaders), play: playing);
     await _mkPlayer.setSubtitleTrack(SubtitleTrack.no());
     if (startMillis > 0) {
@@ -405,11 +417,14 @@ class MpvVideoController(
     return ValueListenableBuilder<double?>(
       valueListenable: sarNotifier,
       builder: (context, sar, child) {
-        if (sar == null) return const SizedBox();
+        // `entry.displayAspectRatio` falls back to 1 when the entry size is
+        // unknown (e.g. remote entries), which would force a square viewport.
+        // In that case let the player derive the aspect ratio from the video.
+        final displaySize = entry.displaySize;
+        final hasKnownSize = displaySize.width > 0 && displaySize.height > 0;
+        if (hasKnownSize && sar == null) return const SizedBox();
+        final aspectRatio = hasKnownSize ? entry.displayAspectRatio * sar! : null;
 
-        // derive DAR (Display Aspect Ratio) from SAR (Storage Aspect Ratio), if any
-        // e.g. 960x536 (~16:9) with SAR 4:3 should be displayed as ~2.39:1
-        final dar = entry.displayAspectRatio * sar;
         return ValueListenableBuilder<VideoController?>(
           valueListenable: _mkControllerNotifier,
           builder: (context, controller, child) {
@@ -417,7 +432,7 @@ class MpvVideoController(
             return Video(
               controller: controller,
               fill: Colors.transparent,
-              aspectRatio: dar,
+              aspectRatio: aspectRatio,
               controls: NoVideoControls,
               wakelock: false,
               subtitleViewConfiguration: const SubtitleViewConfiguration(

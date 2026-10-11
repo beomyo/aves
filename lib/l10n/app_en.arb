@@ -1183,6 +1183,8 @@
   "webdavMediaVideos": "Videos only",
   "webdavShowFileNames": "Show file names",
   "webdavVideoError": "Unable to play this video",
+  "webdavOrientationPortrait": "Portrait",
+  "webdavOrientationLandscape": "Landscape",
   "webdavJumpToPath": "Jump to path",
   "webdavPathHint": "Folder path, e.g. folder/subfolder",
   "webdavActionGo": "Go"
