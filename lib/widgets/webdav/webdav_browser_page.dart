@@ -9,10 +9,12 @@ import 'package:aves/model/source/webdav/webdav_server.dart';
 import 'package:aves/services/common/webdav_registry.dart';
 import 'package:aves/services/media/webdav_fetch_service.dart';
 import 'package:aves/theme/icons.dart';
+import 'package:aves/widgets/common/basic/draggable_scrollbar/scrollbar.dart';
 import 'package:aves/widgets/common/basic/scaffold.dart';
 import 'package:aves/widgets/common/behaviour/eager_scale_gesture_recognizer.dart';
 import 'package:aves/widgets/common/extensions/build_context.dart';
 import 'package:aves/widgets/common/identity/empty.dart';
+import 'package:aves/widgets/common/identity/scroll_thumb.dart';
 import 'package:aves/widgets/common/thumbnail/image.dart';
 import 'package:aves/widgets/navigation/drawer/app_drawer.dart';
 import 'package:aves/widgets/webdav/webdav_layout_bar.dart';
@@ -41,8 +43,6 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
   static const int _maxProbeCount = 400;
   static const int _probeConcurrency = 4;
   static const double _mosaicSpacing = 4;
-  // how far the user must scroll down before the bars hide
-  static const double _immersiveScrollThreshold = 48;
 
   final ValueNotifier<_LoadState> _state = ValueNotifier(_LoadState.loading);
   final ValueNotifier<String> _error = ValueNotifier('');
@@ -57,10 +57,12 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
   Timer? _scrollTimer;
   StreamSubscription? _settingsSub;
 
-  // immersive (bars hidden while scrolling down)
+  // scroll position per folder, to restore it when going back
+  final Map<String, double> _scrollPositions = {};
+
+  // immersive: hide the bottom layout bar while scrolling down
   bool _immersive = false;
   double _lastScrollPixels = 0;
-  double _immersiveAccum = 0;
 
   // pinch to resize
   double _scaleStartColumns = 3;
@@ -119,22 +121,10 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     final pixels = _scrollController.position.pixels;
     final delta = pixels - _lastScrollPixels;
     _lastScrollPixels = pixels;
-
-    if (pixels <= 0) {
-      _immersiveAccum = 0;
-      if (_immersive) setState(() => _immersive = false);
-      return;
-    }
-    if (delta > 0) {
-      // scrolling down: hide the bars after a small distance
-      _immersiveAccum += delta;
-      if (_immersiveAccum > _immersiveScrollThreshold && !_immersive) {
-        setState(() => _immersive = true);
-      }
-    } else if (delta < 0) {
-      // scrolling up: always reveal the bars
-      _immersiveAccum = 0;
-      if (_immersive) setState(() => _immersive = false);
+    // scrolling up reveals the bars, scrolling down hides them
+    final shouldBeImmersive = delta > 0 ? (_immersive || pixels > 24) : false;
+    if (shouldBeImmersive != _immersive) {
+      setState(() => _immersive = shouldBeImmersive);
     }
   }
 
@@ -178,19 +168,55 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     }
   }
 
+  void _rememberScrollPosition() {
+    if (_scrollController.hasClients) {
+      _scrollPositions[_currentUrl] = _scrollController.offset;
+    }
+  }
+
+  void _restoreScrollPosition(String url) {
+    final target = _scrollPositions[url];
+    if (target == null || target <= 0) {
+      _scrollTo(0, url);
+      return;
+    }
+    // the target folder's scroll extent may still be an estimate on the first
+    // frame, so retry once after the layout has settled
+    _scrollTo(target, url);
+    Timer(const Duration(milliseconds: 300), () => _scrollTo(target, url));
+  }
+
+  void _scrollTo(double target, String url) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || url != _currentUrl || !_scrollController.hasClients) return;
+      final max = _scrollController.position.maxScrollExtent;
+      final offset = target.clamp(0.0, max);
+      if ((_scrollController.offset - offset).abs() > 0.5) {
+        _scrollController.jumpTo(offset);
+      }
+      _lastScrollPixels = offset;
+    });
+  }
+
   void _navigateTo(String url) {
     if (url == _currentUrl) return;
+    _rememberScrollPosition();
     setState(() {
       _currentUrl = url;
       _history = _ancestorsFor(url);
+      _immersive = false;
     });
     _fetch();
   }
 
   void _goUp() {
     if (_history.isEmpty) return;
+    _rememberScrollPosition();
     final parent = _history.removeLast();
-    setState(() => _currentUrl = parent);
+    setState(() {
+      _currentUrl = parent;
+      _immersive = false;
+    });
     _fetch();
   }
 
@@ -220,15 +246,11 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
       _images.value = entries;
       _state.value = _LoadState.ready;
 
-      // remember where we are, to restore this page on the next launch
       if (settings.webDavLastServerId != widget.server.id || settings.webDavLastUrl != url) {
         settings.setWebDavLastLocation(widget.server.id, url);
       }
 
-      if (_scrollController.hasClients) {
-        _lastScrollPixels = 0;
-        _scrollController.jumpTo(0);
-      }
+      _restoreScrollPosition(url);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_addressScrollController.hasClients) {
           _addressScrollController.jumpTo(_addressScrollController.position.maxScrollExtent);
@@ -401,16 +423,9 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = context.l10n;
-    final layout = context.select<Settings, String>((s) => s.webDavLayout);
-    final columns = context.select<Settings, double>((s) => s.webDavColumns);
     final showLayoutBar = context.select<Settings, bool>((s) => s.webDavLayoutBar);
     final immersiveEnabled = context.select<Settings, bool>((s) => s.webDavImmersive);
-    final barsVisible = !(immersiveEnabled && _immersive);
-    final topInset = MediaQuery.paddingOf(context).top;
-    final headerHeight = topInset + kToolbarHeight + WebDavBrowserPage.addressBarHeight;
-    final bottomInset = MediaQuery.paddingOf(context).bottom;
-    final bottomPadding = bottomInset + (showLayoutBar ? WebDavLayoutBar.preferredHeight : 0);
+    final barVisible = !(immersiveEnabled && _immersive);
 
     return PopScope(
       canPop: _history.isEmpty,
@@ -418,101 +433,151 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
         if (!didPop) _goUp();
       },
       child: AvesScaffold(
-        extendBody: true,
-        extendBodyBehindAppBar: true,
         drawer: const AppDrawer(),
-        appBar: PreferredSize(
-          preferredSize: Size.fromHeight(headerHeight),
-          child: AnimatedSlide(
-            offset: barsVisible ? Offset.zero : const Offset(0, -1),
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOut,
-            child: _buildHeader(context, topInset),
-          ),
-        ),
-        bottomNavigationBar: showLayoutBar
-            ? AnimatedSlide(
-                offset: barsVisible ? Offset.zero : const Offset(0, 1),
+        bottomNavigationBar: !showLayoutBar
+            ? null
+            : AnimatedSize(
                 duration: const Duration(milliseconds: 200),
                 curve: Curves.easeOut,
-                child: const WebDavLayoutBar(),
-              )
-            : null,
+                alignment: Alignment.topCenter,
+                child: barVisible ? const WebDavLayoutBar() : const SizedBox(width: double.infinity),
+              ),
         body: ValueListenableBuilder<_LoadState>(
           valueListenable: _state,
           builder: (context, state, child) {
-            switch (state) {
-              case _LoadState.loading:
-                return const Center(child: CircularProgressIndicator());
-              case _LoadState.error:
-                return ValueListenableBuilder<String>(
-                  valueListenable: _error,
-                  builder: (context, error, child) => EmptyContent(
-                    icon: AIcons.error,
-                    text: '${l10n.webdavLoadError}\n$error',
-                    bottom: Padding(
-                      padding: const EdgeInsets.only(top: 16),
-                      child: OutlinedButton(onPressed: _fetch, child: Text(l10n.webdavRefresh)),
-                    ),
-                  ),
+            return ValueListenableBuilder<List<WebDavResource>>(
+              valueListenable: _folders,
+              builder: (context, folders, child) {
+                return ValueListenableBuilder<List<AvesEntry>>(
+                  valueListenable: _images,
+                  builder: (context, images, child) => _buildScrollView(context, state: state, folders: folders, images: images),
                 );
-              case _LoadState.ready:
-                return _buildContent(context, columns: columns, layout: layout, headerHeight: headerHeight, bottomPadding: bottomPadding);
-            }
+              },
+            );
           },
         ),
       ),
     );
   }
 
-  Widget _buildHeader(BuildContext context, double topInset) {
-    final l10n = context.l10n;
-    return Material(
-      color: Theme.of(context).colorScheme.surface,
-      child: Padding(
-        padding: EdgeInsets.only(top: topInset),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              height: kToolbarHeight,
-              child: Row(
-                children: [
-                  Builder(
-                    builder: (context) => IconButton(
-                      icon: const Icon(Icons.menu),
-                      onPressed: () => Scaffold.maybeOf(context)?.openDrawer(),
-                    ),
-                  ),
-                  Expanded(
-                    child: Text(
-                      _folderName,
-                      style: Theme.of(context).textTheme.titleLarge,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: l10n.webdavLayout,
-                    icon: const Icon(AIcons.layout),
-                    onPressed: () => settings.webDavLayoutBar = !settings.webDavLayoutBar,
-                  ),
-                  IconButton(
-                    tooltip: l10n.webdavServersPageTitle,
-                    icon: const Icon(AIcons.cloud),
-                    onPressed: _openServers,
-                  ),
-                  IconButton(
-                    tooltip: l10n.webdavRefresh,
-                    onPressed: _fetch,
-                    icon: const Icon(AIcons.refresh),
-                  ),
-                ],
+  Widget _buildScrollView(BuildContext context, {required _LoadState state, required List<WebDavResource> folders, required List<AvesEntry> images}) {
+    final layout = context.select<Settings, String>((s) => s.webDavLayout);
+    final columns = context.select<Settings, double>((s) => s.webDavColumns);
+    final immersiveEnabled = context.select<Settings, bool>((s) => s.webDavImmersive);
+    final topInset = MediaQuery.paddingOf(context).top;
+    final headerHeight = topInset + kToolbarHeight + WebDavBrowserPage.addressBarHeight;
+
+    final isEmpty = state != _LoadState.ready || (folders.isEmpty && images.isEmpty);
+
+    final List<Widget> contentSlivers;
+    if (state == _LoadState.loading) {
+      contentSlivers = [const SliverFillRemaining(hasScrollBody: false, child: Center(child: CircularProgressIndicator()))];
+    } else if (state == _LoadState.error) {
+      contentSlivers = [
+        SliverFillRemaining(
+          hasScrollBody: false,
+          child: ValueListenableBuilder<String>(
+            valueListenable: _error,
+            builder: (context, error, child) => EmptyContent(
+              icon: AIcons.error,
+              text: '${context.l10n.webdavLoadError}\n$error',
+              bottom: Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: OutlinedButton(onPressed: _fetch, child: Text(context.l10n.webdavRefresh)),
               ),
             ),
-            _buildAddressBar(context),
+          ),
+        ),
+      ];
+    } else if (folders.isEmpty && images.isEmpty) {
+      contentSlivers = [SliverFillRemaining(hasScrollBody: false, child: EmptyContent(icon: AIcons.folder, text: context.l10n.webdavEmptyFolder))];
+    } else {
+      contentSlivers = [
+        if (folders.isNotEmpty) _buildFolderSliver(context, folders),
+        if (images.isNotEmpty)
+          if (layout == 'mosaic')
+            ..._buildMosaicSlivers(context, images, columns)
+          else if (layout == 'list')
+            _buildListSliver(context, images)
+          else
+            _buildGridSliver(context, images, columns),
+        const SliverToBoxAdapter(child: SizedBox(height: 8)),
+      ];
+    }
+
+    return RawGestureDetector(
+      gestures: {
+        EagerScaleGestureRecognizer: GestureRecognizerFactoryWithHandlers<EagerScaleGestureRecognizer>(
+          () => EagerScaleGestureRecognizer(debugOwner: this),
+          (instance) {
+            instance
+              ..onStart = _onScaleStart
+              ..onUpdate = _onScaleUpdate;
+          },
+        ),
+      },
+      child: DraggableScrollbar(
+        backgroundColor: Colors.white,
+        scrollThumbSize: AvesScrollThumb.thumbSize,
+        scrollThumbBuilder: AvesScrollThumb.builder(
+          height: AvesScrollThumb.thumbHeight,
+          backgroundColor: Colors.white,
+        ),
+        controller: _scrollController,
+        padding: EdgeInsets.only(top: immersiveEnabled ? 0 : headerHeight),
+        labelTextBuilder: (offsetY) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Text(_folderName, style: const TextStyle(color: Colors.black87)),
+        ),
+        crumbTextBuilder: (label) => const SizedBox.shrink(),
+        child: CustomScrollView(
+          controller: _scrollController,
+          // prevent scrolling the app bar away when there is nothing to scroll
+          physics: isEmpty ? const NeverScrollableScrollPhysics() : null,
+          slivers: [
+            _buildAppBar(context, immersiveEnabled),
+            ...contentSlivers,
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildAppBar(BuildContext context, bool immersiveEnabled) {
+    final l10n = context.l10n;
+    return SliverAppBar(
+      primary: true,
+      pinned: !immersiveEnabled,
+      floating: immersiveEnabled,
+      snap: immersiveEnabled,
+      automaticallyImplyLeading: false,
+      leading: Builder(
+        builder: (context) => IconButton(
+          icon: const Icon(Icons.menu),
+          onPressed: () => Scaffold.maybeOf(context)?.openDrawer(),
+        ),
+      ),
+      title: Text(_folderName, maxLines: 1, overflow: TextOverflow.ellipsis),
+      actions: [
+        IconButton(
+          tooltip: l10n.webdavLayout,
+          icon: const Icon(AIcons.layout),
+          onPressed: () => settings.webDavLayoutBar = !settings.webDavLayoutBar,
+        ),
+        IconButton(
+          tooltip: l10n.webdavServersPageTitle,
+          icon: const Icon(AIcons.cloud),
+          onPressed: _openServers,
+        ),
+        IconButton(
+          tooltip: l10n.webdavRefresh,
+          onPressed: _fetch,
+          icon: const Icon(AIcons.refresh),
+        ),
+      ],
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(WebDavBrowserPage.addressBarHeight),
+        child: _buildAddressBar(context),
       ),
     );
   }
@@ -578,69 +643,17 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     );
   }
 
-  Widget _buildContent(BuildContext context, {required double columns, required String layout, required double headerHeight, required double bottomPadding}) {
-    return RawGestureDetector(
-      gestures: {
-        EagerScaleGestureRecognizer: GestureRecognizerFactoryWithHandlers<EagerScaleGestureRecognizer>(
-          () => EagerScaleGestureRecognizer(debugOwner: this),
-          (instance) {
-            instance
-              ..onStart = _onScaleStart
-              ..onUpdate = _onScaleUpdate;
-          },
-        ),
+  Widget _buildFolderSliver(BuildContext context, List<WebDavResource> folders) {
+    return SliverList.builder(
+      itemCount: folders.length,
+      itemBuilder: (context, index) {
+        final folder = folders[index];
+        return ListTile(
+          leading: const Icon(AIcons.folder),
+          title: Text(folder.name),
+          onTap: () => _openFolder(folder),
+        );
       },
-      child: ValueListenableBuilder<List<AvesEntry>>(
-        valueListenable: _images,
-        builder: (context, images, child) {
-          return ValueListenableBuilder<List<WebDavResource>>(
-            valueListenable: _folders,
-            builder: (context, folders, child) {
-              if (folders.isEmpty && images.isEmpty) {
-                return EmptyContent(icon: AIcons.folder, text: context.l10n.webdavEmptyFolder);
-              }
-              final slivers = <Widget>[
-                if (folders.isNotEmpty)
-                  SliverList.builder(
-                    itemCount: folders.length,
-                    itemBuilder: (context, index) {
-                      final folder = folders[index];
-                      return ListTile(
-                        leading: const Icon(AIcons.folder),
-                        title: Text(folder.name),
-                        onTap: () => _openFolder(folder),
-                      );
-                    },
-                  ),
-                if (images.isNotEmpty)
-                  if (layout == 'mosaic')
-                    ..._buildMosaicSlivers(context, images, columns)
-                  else if (layout == 'list')
-                    _buildListSliver(context, images)
-                  else
-                    _buildGridSliver(context, images, columns),
-              ];
-              return _buildScrollArea(context, slivers, headerHeight, bottomPadding);
-            },
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildScrollArea(BuildContext context, List<Widget> slivers, double topPadding, double bottomPadding) {
-    return Scrollbar(
-      controller: _scrollController,
-      thumbVisibility: true,
-      interactive: true,
-      child: CustomScrollView(
-        controller: _scrollController,
-        slivers: [
-          SliverToBoxAdapter(child: SizedBox(height: topPadding)),
-          ...slivers,
-          SliverToBoxAdapter(child: SizedBox(height: bottomPadding)),
-        ],
-      ),
     );
   }
 
