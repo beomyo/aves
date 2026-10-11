@@ -2,17 +2,19 @@ import 'package:aves/model/settings/settings.dart';
 import 'package:aves/theme/icons.dart';
 import 'package:aves/widgets/common/extensions/build_context.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:provider/provider.dart';
 
 Future<void> showWebDavViewOptions(BuildContext context) {
   return showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
+    isScrollControlled: true,
     builder: (context) => const WebDavViewOptionsSheet(),
   );
 }
 
-// all the view related options, gathered behind the app bar "view" button
+// all the view related options, gathered behind the app bar "view" button.
+// reads the global `settings` directly (no `Provider` lookup) so that it also
+// works when shown from a separate modal route.
 class WebDavViewOptionsSheet extends StatelessWidget {
   static const List<String> layoutValues = ['mosaic', 'grid', 'list'];
   static const List<String> mediaValues = ['all', 'image', 'video'];
@@ -46,63 +48,68 @@ class WebDavViewOptionsSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final layout = context.select<Settings, String>((s) => s.webDavLayout);
-    final columns = context.select<Settings, double>((s) => s.webDavColumns);
-    final media = context.select<Settings, String>((s) => s.webDavMediaFilter);
-    final showNames = context.select<Settings, bool>((s) => s.webDavShowNames);
-    final immersive = context.select<Settings, bool>((s) => s.webDavImmersive);
+    return ListenableBuilder(
+      listenable: settings,
+      builder: (context, child) {
+        final layout = settings.webDavLayout;
+        final columns = settings.webDavColumns;
+        final media = settings.webDavMediaFilter;
+        final showNames = settings.webDavShowNames;
+        final immersive = settings.webDavImmersive;
 
-    return SafeArea(
-      top: false,
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _sectionTitle(context, l10n.webdavLayout),
-            _chips<String>(
-              values: layoutValues,
-              selected: layout,
-              label: (v) => layoutName(context, v),
-              icon: layoutIcon,
-              onSelected: (v) => settings.webDavLayout = v,
-            ),
-            if (layout != 'list') ...[
-              _sectionTitle(context, '${l10n.webdavColumnsTitle}  ${columns.round()}'),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Slider(
-                  value: columns.clamp(1.5, 8),
-                  min: 1.5,
-                  max: 8,
-                  divisions: 13,
-                  label: '${columns.round()}',
-                  onChanged: (v) => settings.webDavColumns = v,
+        return SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _sectionTitle(context, l10n.webdavLayout),
+                _chips<String>(
+                  values: layoutValues,
+                  selected: layout,
+                  label: (v) => layoutName(context, v),
+                  icon: layoutIcon,
+                  onSelected: (v) => settings.webDavLayout = v,
                 ),
-              ),
-            ],
-            _sectionTitle(context, l10n.webdavMediaType),
-            _chips<String>(
-              values: mediaValues,
-              selected: media,
-              label: (v) => mediaName(context, v),
-              icon: mediaIcon,
-              onSelected: (v) => settings.webDavMediaFilter = v,
+                if (layout != 'list') ...[
+                  _sectionTitle(context, '${l10n.webdavColumnsTitle}  ${columns.round()}'),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Slider(
+                      value: columns.clamp(1.5, 8),
+                      min: 1.5,
+                      max: 8,
+                      divisions: 13,
+                      label: '${columns.round()}',
+                      onChanged: (v) => settings.webDavColumns = v,
+                    ),
+                  ),
+                ],
+                _sectionTitle(context, l10n.webdavMediaType),
+                _chips<String>(
+                  values: mediaValues,
+                  selected: media,
+                  label: (v) => mediaName(context, v),
+                  icon: mediaIcon,
+                  onSelected: (v) => settings.webDavMediaFilter = v,
+                ),
+                const Divider(height: 24),
+                SwitchListTile(
+                  title: Text(l10n.webdavShowFileNames),
+                  value: showNames,
+                  onChanged: (v) => settings.webDavShowNames = v,
+                ),
+                SwitchListTile(
+                  title: Text(l10n.webdavImmersive),
+                  value: immersive,
+                  onChanged: (v) => settings.webDavImmersive = v,
+                ),
+                const SizedBox(height: 8),
+              ],
             ),
-            const Divider(height: 24),
-            SwitchListTile(
-              title: Text(l10n.webdavShowFileNames),
-              value: showNames,
-              onChanged: (v) => settings.webDavShowNames = v,
-            ),
-            SwitchListTile(
-              title: Text(l10n.webdavImmersive),
-              value: immersive,
-              onChanged: (v) => settings.webDavImmersive = v,
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
