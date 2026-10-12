@@ -1187,5 +1187,21 @@
   "webdavOrientationLandscape": "Landscape",
   "webdavJumpToPath": "Jump to path",
   "webdavPathHint": "Folder path, e.g. folder/subfolder",
-  "webdavActionGo": "Go"
+  "webdavActionGo": "Go",
+  "cloudTitle": "Cloud services",
+  "cloudServersPageTitle": "Cloud services",
+  "cloudAddService": "Add service",
+  "cloudAddWebDav": "Add WebDAV",
+  "cloudAddSmb": "Add SMB",
+  "cloudRemoveServer": "Remove service",
+  "cloudEmptyServers": "No service configured",
+  "cloudServerAddress": "Server address",
+  "cloudSmbAddress": "SMB address",
+  "cloudSmbDomain": "Domain (optional)",
+  "cloudTypeWebDav": "WebDAV",
+  "cloudTypeSmb": "SMB / Windows share",
+  "cloudTypeWebDavHint": "WebDAV server, e.g. AList, Nextcloud",
+  "cloudTypeSmbHint": "Windows / NAS network share",
+  "cloudSortNameAsc": "Name (A to Z)",
+  "cloudSortNameDesc": "Name (Z to A)"
 }

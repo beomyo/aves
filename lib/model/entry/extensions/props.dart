@@ -34,11 +34,11 @@ extension ExtraAvesEntryProps on AvesEntry {
 
   // remote
 
-  bool get isWebDav => uri.startsWith('http://') || uri.startsWith('https://');
+  bool get isRemote => uri.startsWith('http://') || uri.startsWith('https://') || uri.startsWith('smb://');
 
   // size
 
-  bool get useTiles => !isWebDav && !isAnimated;
+  bool get useTiles => !isRemote && !isAnimated;
 
   bool get isSized => width > 0 && height > 0;
 
@@ -103,7 +103,7 @@ extension ExtraAvesEntryProps on AvesEntry {
 
   String? get storagePath {
     // remote entries have no local storage path
-    if (isWebDav) return null;
+    if (isRemote) return null;
     if (trashed) {
       final _storagePath = trashDetails?.path;
       if (_storagePath != null) {
@@ -132,7 +132,7 @@ extension ExtraAvesEntryProps on AvesEntry {
 
   bool get isMissingAtPath {
     // remote entries are not checked against the local file system
-    if (isWebDav) return false;
+    if (isRemote) return false;
     final _storagePath = storagePath;
     return _storagePath != null && !File(_storagePath).existsSync();
   }

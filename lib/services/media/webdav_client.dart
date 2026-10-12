@@ -2,26 +2,15 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:aves/model/source/webdav/webdav_resource.dart';
-import 'package:aves/model/source/webdav/webdav_server.dart';
+import 'package:aves/model/source/cloud/cloud_resource.dart';
+import 'package:aves/model/source/cloud/cloud_server.dart';
+import 'package:aves/services/media/cloud_client.dart';
 import 'package:collection/collection.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:xml/xml.dart';
 
-class WebDavException implements Exception {
-  final String message;
-  final int? statusCode;
-
-  const new(this.message, {this.statusCode});
-
-  bool get isAuthError => statusCode == 401 || statusCode == 403;
-
-  @override
-  String toString() => 'WebDavException($statusCode): $message';
-}
-
-class WebDavClient {
+class WebDavClient implements CloudClient {
   static const _propfindBody =
       '<?xml version="1.0" encoding="utf-8"?>'
       '<D:propfind xmlns:D="DAV:">'
@@ -36,7 +25,7 @@ class WebDavClient {
   static const _listTimeout = Duration(seconds: 90);
   static const _getTimeout = Duration(seconds: 120);
 
-  final WebDavServer server;
+  final CloudServer server;
 
   // normalized base URL, always ending with a separator
   late final Uri baseUri;
@@ -58,6 +47,7 @@ class WebDavClient {
     }
   }
 
+  @override
   void close() => _client.close();
 
   Map<String, String> get _authHeaders {
@@ -72,11 +62,13 @@ class WebDavClient {
     return baseUri.resolveUri(uri);
   }
 
+  @override
   Future<void> testConnection() async {
     await list(baseUri.toString());
   }
 
-  Future<List<WebDavResource>> list(String url) async {
+  @override
+  Future<List<CloudResource>> list(String url) async {
     final requestUrl = resolve(url);
     final request = http.Request('PROPFIND', requestUrl)
       ..headers.addAll({
@@ -90,26 +82,28 @@ class WebDavClient {
     return _parseMultiStatus(body, requestUrl.path, baseUri);
   }
 
+  @override
   Future<Uint8List> getBytes(String url) async {
     final requestUrl = resolve(url);
     try {
       final response = await _client.get(requestUrl, headers: _authHeaders).timeout(_getTimeout);
       if (response.statusCode >= 400) {
-        throw WebDavException('failed to download file', statusCode: response.statusCode);
+        throw CloudException('failed to download file', statusCode: response.statusCode);
       }
       return response.bodyBytes;
     } on SocketException catch (e) {
-      throw WebDavException('connection failed: ${e.message}');
+      throw CloudException('connection failed: ${e.message}');
     } on HandshakeException catch (e) {
-      throw WebDavException('TLS handshake failed: ${e.message}');
+      throw CloudException('TLS handshake failed: ${e.message}');
     } on Exception catch (e) {
-      throw WebDavException('download failed: $e');
+      throw CloudException('download failed: $e');
     }
   }
 
   // fetches only the leading bytes of a file (used to read image dimensions
   // without downloading the whole file). Falls back to aborting early when the
   // server ignores the `Range` header.
+  @override
   Future<Uint8List?> probeBytes(String url, {int maxBytes = 96 * 1024}) async {
     final requestUrl = resolve(url);
     final request = http.Request('GET', requestUrl)
@@ -143,11 +137,11 @@ class WebDavClient {
     try {
       response = await http.Response.fromStream(await _client.send(request)).timeout(timeout);
     } on SocketException catch (e) {
-      throw WebDavException('connection failed: ${e.message}');
+      throw CloudException('connection failed: ${e.message}');
     } on HandshakeException catch (e) {
-      throw WebDavException('TLS handshake failed: ${e.message}');
+      throw CloudException('TLS handshake failed: ${e.message}');
     } on Exception catch (e) {
-      throw WebDavException('request failed: $e');
+      throw CloudException('request failed: $e');
     }
 
     // follow a single redirect if the server moved the collection
@@ -166,15 +160,15 @@ class WebDavClient {
       case 207:
         return response.body;
       case 401:
-        throw const WebDavException('authentication failed, check the username and password', statusCode: 401);
+        throw const CloudException('authentication failed, check the username and password', statusCode: 401);
       case 403:
-        throw const WebDavException('access forbidden', statusCode: 403);
+        throw const CloudException('access forbidden', statusCode: 403);
       case 404:
-        throw const WebDavException('path not found, the URL is likely wrong (e.g. AList uses "/dav")', statusCode: 404);
+        throw const CloudException('path not found, the URL is likely wrong (e.g. AList uses "/dav")', statusCode: 404);
       case 405:
-        throw const WebDavException('not a WebDAV endpoint, the URL is likely wrong (e.g. AList uses "/dav")', statusCode: 405);
+        throw const CloudException('not a WebDAV endpoint, the URL is likely wrong (e.g. AList uses "/dav")', statusCode: 405);
       default:
-        throw WebDavException('unexpected server response', statusCode: response.statusCode);
+        throw CloudException('unexpected server response', statusCode: response.statusCode);
     }
   }
 
@@ -183,8 +177,8 @@ class WebDavClient {
   // so all lookups go through local-name comparisons.
   static Iterable<XmlElement> _childElements(XmlElement element, String localName) => element.childElements.where((e) => e.name.local == localName);
 
-  static List<WebDavResource> _parseMultiStatus(String body, String requestedPath, Uri base) {
-    final resources = <WebDavResource>[];
+  static List<CloudResource> _parseMultiStatus(String body, String requestedPath, Uri base) {
+    final resources = <CloudResource>[];
     final document = XmlDocument.parse(body);
 
     for (final response in document.descendantElements.where((e) => e.name.local == 'response')) {
@@ -215,7 +209,7 @@ class WebDavClient {
       if (name.isEmpty) continue;
 
       resources.add(
-        WebDavResource(
+        CloudResource(
           url: resolved.toString(),
           name: name,
           isCollection: isCollection,

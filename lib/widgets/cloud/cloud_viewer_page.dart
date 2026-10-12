@@ -4,8 +4,8 @@ import 'package:aves/theme/icons.dart';
 import 'package:aves/widgets/common/basic/scaffold.dart';
 import 'package:material_ui/material_ui.dart';
 
-class WebDavViewerPage extends StatefulWidget {
-  static const routeName = '/webdav/viewer';
+class CloudViewerPage extends StatefulWidget {
+  static const routeName = '/cloud/viewer';
 
   final List<AvesEntry> entries;
   final int initialIndex;
@@ -17,10 +17,10 @@ class WebDavViewerPage extends StatefulWidget {
   });
 
   @override
-  State<WebDavViewerPage> createState() => _WebDavViewerPageState();
+  State<CloudViewerPage> createState() => _CloudViewerPageState();
 }
 
-class _WebDavViewerPageState extends State<WebDavViewerPage> {
+class _CloudViewerPageState extends State<CloudViewerPage> {
   late final int _initialIndex;
   late final PageController _pageController;
   late final ValueNotifier<int> _indexNotifier;

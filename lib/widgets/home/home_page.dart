@@ -42,7 +42,7 @@ import 'package:aves/widgets/settings/settings_page.dart';
 import 'package:aves/widgets/viewer/entry_viewer_page.dart';
 import 'package:aves/widgets/viewer/screen_saver_page.dart';
 import 'package:aves/widgets/wallpaper_page.dart';
-import 'package:aves/widgets/webdav/webdav_entry_page.dart';
+import 'package:aves/widgets/cloud/cloud_entry_page.dart';
 import 'package:aves_model/aves_model.dart';
 import 'package:collection/collection.dart';
 import 'package:intl/intl.dart';
@@ -464,8 +464,8 @@ class _HomePageState extends State<HomePage> with FeedbackMixin {
         );
       case SettingsPage.routeName:
         return buildRoute((context) => const SettingsPage());
-      case WebDavEntryPage.routeName:
-        return buildRoute((context) => const WebDavEntryPage());
+      case CloudEntryPage.routeName:
+        return buildRoute((context) => const CloudEntryPage());
       case CollectionPage.routeName:
       default:
         return buildRoute((context) => CollectionPage(source: source, filters: filters));

@@ -166,15 +166,22 @@ class SettingKeys {
   // bin
   static const enableBinKey = 'enable_bin';
 
-  // webdav
-  static const webDavServersKey = 'webdav_servers';
-  static const webDavColumnsKey = 'webdav_columns';
-  static const webDavLayoutKey = 'webdav_layout';
-  static const webDavMediaFilterKey = 'webdav_media_filter';
-  static const webDavShowNamesKey = 'webdav_show_names';
-  static const webDavImmersiveKey = 'webdav_immersive';
-  static const webDavLastServerIdKey = 'webdav_last_server_id';
-  static const webDavLastUrlKey = 'webdav_last_url';
+  // cloud services (WebDAV / SMB)
+  static const cloudServersKey = 'cloud_servers';
+  static const cloudColumnsKey = 'cloud_columns';
+  static const cloudLayoutKey = 'cloud_layout';
+  static const cloudMediaFilterKey = 'cloud_media_filter';
+  static const cloudShowNamesKey = 'cloud_show_names';
+  static const cloudImmersiveKey = 'cloud_immersive';
+  static const cloudSortKey = 'cloud_sort';
+  static const cloudVisitedFoldersKey = 'cloud_visited_folders';
+  static const cloudLastServerIdKey = 'cloud_last_server_id';
+  static const cloudLastUrlKey = 'cloud_last_url';
+
+  // legacy keys, kept to migrate existing configurations
+  static const legacyCloudServersKey = 'webdav_servers';
+  static const legacyWebDavLastServerIdKey = 'webdav_last_server_id';
+  static const legacyWebDavLastUrlKey = 'webdav_last_url';
 
   // accessibility
   static const showPinchGestureAlternativesKey = 'show_pinch_gesture_alternatives';

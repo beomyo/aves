@@ -16,8 +16,8 @@ import 'package:material_ui/material_ui.dart';
 
 // Minimal video player for remote (WebDAV) entries, reusing Aves' video stack.
 // The mpv backend opens `entry.uri` directly, so an http(s) URL plays as is.
-class WebDavVideoPage extends StatefulWidget {
-  static const routeName = '/webdav/video';
+class CloudVideoPage extends StatefulWidget {
+  static const routeName = '/cloud/video';
   static const List<double> _speeds = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
   final AvesEntry entry;
@@ -25,10 +25,10 @@ class WebDavVideoPage extends StatefulWidget {
   const new({super.key, required this.entry});
 
   @override
-  State<WebDavVideoPage> createState() => _WebDavVideoPageState();
+  State<CloudVideoPage> createState() => _CloudVideoPageState();
 }
 
-class _WebDavVideoPageState extends State<WebDavVideoPage> {
+class _CloudVideoPageState extends State<CloudVideoPage> {
   AvesVideoController? _controller;
   StreamSubscription<PlaybackStatus>? _statusSub;
   StreamSubscription<int>? _positionSub;
@@ -280,7 +280,7 @@ class _WebDavVideoPageState extends State<WebDavVideoPage> {
                     PopupMenuButton<double>(
                       tooltip: '',
                       itemBuilder: (context) => [
-                        for (final s in WebDavVideoPage._speeds) PopupMenuItem(value: s, child: Text(_formatSpeed(s))),
+                        for (final s in CloudVideoPage._speeds) PopupMenuItem(value: s, child: Text(_formatSpeed(s))),
                       ],
                       onSelected: (v) => controller.setSpeed(v),
                       child: Padding(

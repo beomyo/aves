@@ -8,7 +8,7 @@ import 'package:aves/widgets/explorer/explorer_page.dart';
 import 'package:aves/widgets/filter_grids/albums_page.dart';
 import 'package:aves/widgets/filter_grids/tags_page.dart';
 import 'package:aves/widgets/navigation/nav_item.dart';
-import 'package:aves/widgets/webdav/webdav_entry_page.dart';
+import 'package:aves/widgets/cloud/cloud_entry_page.dart';
 import 'package:aves_model/aves_model.dart';
 import 'package:aves_utils/aves_utils.dart';
 import 'package:synchronized/synchronized.dart';
@@ -38,8 +38,8 @@ mixin NavigationSettings on SettingsAccess {
         return const AvesNavItem(route: TagListPage.routeName);
       case .explorer:
         return AvesNavItem(route: ExplorerPage.routeName, path: homeCustomExplorerPath);
-      case .webDav:
-        return const AvesNavItem(route: WebDavEntryPage.routeName);
+      case .cloud:
+        return const AvesNavItem(route: CloudEntryPage.routeName);
     }
   }
 

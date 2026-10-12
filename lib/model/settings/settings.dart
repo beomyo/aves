@@ -23,7 +23,7 @@ import 'package:aves/model/settings/modules/privacy.dart';
 import 'package:aves/model/settings/modules/screen_saver.dart';
 import 'package:aves/model/settings/modules/slideshow.dart';
 import 'package:aves/model/settings/modules/viewer.dart';
-import 'package:aves/model/settings/modules/webdav.dart';
+import 'package:aves/model/settings/modules/cloud.dart';
 import 'package:aves/model/settings/modules/widget.dart';
 import 'package:aves/ref/bursts.dart';
 import 'package:aves/services/accessibility_service.dart';
@@ -65,7 +65,7 @@ class Settings
         SubtitlesSettings,
         VideoSettings,
         ViewerSettings,
-        WebDavSettings,
+        CloudSettings,
         WidgetSettings {
   final Set<StreamSubscription> _subscriptions = {};
   final EventChannel _platformSettingsChangeChannel = const OptionalEventChannel('deckers.thibault/aves/settings_change');

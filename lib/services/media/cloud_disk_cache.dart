@@ -3,9 +3,9 @@ import 'dart:io';
 import 'package:aves/services/common/services.dart';
 import 'package:flutter/foundation.dart';
 
-// simple LRU disk cache for downloaded WebDAV payloads,
+// simple LRU disk cache for downloaded cloud payloads (WebDAV / SMB),
 // keyed by URL via a stable FNV-1a hash
-class WebDavDiskCache {
+class CloudDiskCache {
   static const int _maxBytes = 256 << 20; // 256 MiB
   static const int _fnvOffset = 0x811c9dc5;
   static const int _fnvPrime = 0x01000193;
@@ -16,7 +16,7 @@ class WebDavDiskCache {
     final existing = _dir;
     if (existing != null) return existing;
     final root = await storageService.getExternalCacheDirectory();
-    final dir = Directory('$root/webdav');
+    final dir = Directory('$root/cloud');
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
@@ -48,7 +48,7 @@ class WebDavDiskCache {
       await file.setLastModified(DateTime.now());
       return bytes;
     } catch (error) {
-      debugPrint('webdav cache read failed for $url error=$error');
+      debugPrint('cloud cache read failed for $url error=$error');
       return null;
     }
   }
@@ -59,7 +59,7 @@ class WebDavDiskCache {
       await file.writeAsBytes(bytes, flush: true);
       await _evict();
     } catch (error) {
-      debugPrint('webdav cache write failed for $url error=$error');
+      debugPrint('cloud cache write failed for $url error=$error');
     }
   }
 
@@ -82,7 +82,7 @@ class WebDavDiskCache {
         total -= stat.size;
       }
     } catch (error) {
-      debugPrint('webdav cache eviction failed error=$error');
+      debugPrint('cloud cache eviction failed error=$error');
     }
   }
 
@@ -94,9 +94,9 @@ class WebDavDiskCache {
       }
       _dir = null;
     } catch (error) {
-      debugPrint('webdav cache clear failed error=$error');
+      debugPrint('cloud cache clear failed error=$error');
     }
   }
 }
 
-final webDavDiskCache = WebDavDiskCache();
+final cloudDiskCache = CloudDiskCache();

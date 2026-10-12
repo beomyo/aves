@@ -4,19 +4,19 @@ import 'dart:ui' as ui;
 import 'package:aves/image_providers/region_provider.dart';
 import 'package:aves/image_providers/thumbnail_provider.dart';
 import 'package:aves/model/entry/entry.dart';
+import 'package:aves/services/common/cloud_registry.dart';
 import 'package:aves/services/common/service_policy.dart';
-import 'package:aves/services/common/webdav_registry.dart';
+import 'package:aves/services/media/cloud_client.dart';
+import 'package:aves/services/media/cloud_disk_cache.dart';
 import 'package:aves/services/media/media_fetch_service.dart';
-import 'package:aves/services/media/webdav_client.dart';
-import 'package:aves/services/media/webdav_disk_cache.dart';
 import 'package:aves_report/aves_report.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
-bool isRemoteUri(String uri) => uri.startsWith('http://') || uri.startsWith('https://');
+bool isCloudUri(String uri) => uri.startsWith('http://') || uri.startsWith('https://') || uri.startsWith('smb://');
 
-class WebDavImageLoader {
+class CloudImageLoader {
   // hard caps on the decoded dimensions: remote files can be enormous, and
   // decoding several of them at native resolution is what used to OOM
   static const int _maxThumbnailDim = 1024;
@@ -26,16 +26,16 @@ class WebDavImageLoader {
   final Map<String, double> _aspectCache = {};
 
   Future<Uint8List> bytesFor(String url) async {
-    final cached = await webDavDiskCache.get(url);
+    final cached = await cloudDiskCache.get(url);
     if (cached != null) return cached;
 
-    final client = webDavRegistry.clientForUrl(url);
+    final client = cloudRegistry.clientForUrl(url);
     if (client == null) {
-      throw WebDavException('no WebDAV server configured for $url');
+      throw CloudException('no cloud service configured for $url');
     }
     final bytes = await client.getBytes(url);
     if (bytes.isNotEmpty) {
-      await webDavDiskCache.put(url, bytes);
+      await cloudDiskCache.put(url, bytes);
     }
     return bytes;
   }
@@ -66,7 +66,7 @@ class WebDavImageLoader {
     final cached = _aspectCache[url];
     if (cached != null) return cached;
 
-    final client = webDavRegistry.clientForUrl(url);
+    final client = cloudRegistry.clientForUrl(url);
     if (client == null) return null;
 
     final bytes = await client.probeBytes(url);
@@ -136,29 +136,29 @@ class WebDavImageLoader {
   // `instantiateImageCodec` when it is missing
   static ImageDecoderCallback _decoderFor(ImageDecoderCallback? decode) {
     if (decode != null) return decode;
-    throw UnreportedStateError('missing decoder for webdav thumbnail');
+    throw UnreportedStateError('missing decoder for cloud thumbnail');
   }
 }
 
-final webDavImageLoader = WebDavImageLoader();
+final cloudImageLoader = CloudImageLoader();
 
-// Decorates the platform media fetch service so that `http(s)` URIs
-// (WebDAV entries) are served from the network while every other URI
+// Decorates the platform media fetch service so that remote URIs
+// (WebDAV / SMB entries) are served from the network while every other URI
 // keeps using the platform implementation unchanged.
-class WebDavAwareMediaFetchService implements MediaFetchService {
+class CloudAwareMediaFetchService implements MediaFetchService {
   final MediaFetchService _delegate;
 
   const new(this._delegate);
 
   @override
   Future<AvesEntry?> getEntry(String uri, String? mimeType, {bool allowUnsized = false}) {
-    if (isRemoteUri(uri)) return Future.value(null);
+    if (isCloudUri(uri)) return Future.value(null);
     return _delegate.getEntry(uri, mimeType, allowUnsized: allowUnsized);
   }
 
   @override
   Future<Uint8List> getOriginalBytes(AvesEntry entry) {
-    if (isRemoteUri(entry.uri)) return webDavImageLoader.bytesFor(entry.uri);
+    if (isCloudUri(entry.uri)) return cloudImageLoader.bytesFor(entry.uri);
     return _delegate.getOriginalBytes(entry);
   }
 
@@ -168,8 +168,8 @@ class WebDavAwareMediaFetchService implements MediaFetchService {
     required ImageRequest request,
     required ImageDecoderCallback decode,
   }) {
-    if (isRemoteUri(request.uri)) {
-      return webDavImageLoader.loadFullImage(request, decode);
+    if (isCloudUri(request.uri)) {
+      return cloudImageLoader.loadFullImage(request, decode);
     }
     return _delegate.getFullImage(decoded: decoded, request: request, decode: decode);
   }
@@ -183,7 +183,7 @@ class WebDavAwareMediaFetchService implements MediaFetchService {
     int? priority,
   }) {
     // remote entries never use tiling (see `ExtraAvesEntryProps.useTiles`)
-    if (isRemoteUri(request.uri)) {
+    if (isCloudUri(request.uri)) {
       throw UnreportedStateError('region requests are not supported for remote entries uri=${request.uri}');
     }
     return _delegate.getRegion(decoded: decoded, request: request, decode: decode, taskKey: taskKey, priority: priority);
@@ -197,8 +197,8 @@ class WebDavAwareMediaFetchService implements MediaFetchService {
     Object? taskKey,
     int? priority,
   }) {
-    if (isRemoteUri(request.uri)) {
-      return webDavImageLoader.loadThumbnail(request, decode, taskKey, priority);
+    if (isCloudUri(request.uri)) {
+      return cloudImageLoader.loadThumbnail(request, decode, taskKey, priority);
     }
     return _delegate.getThumbnail(decoded: decoded, request: request, decode: decode, taskKey: taskKey, priority: priority);
   }
@@ -209,7 +209,7 @@ class WebDavAwareMediaFetchService implements MediaFetchService {
   @override
   Future<void> clearImageDiskCache() async {
     await _delegate.clearImageDiskCache();
-    await webDavDiskCache.clear();
+    await cloudDiskCache.clear();
   }
 
   @override

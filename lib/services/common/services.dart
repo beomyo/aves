@@ -11,7 +11,7 @@ import 'package:aves/services/media/media_edit_service.dart';
 import 'package:aves/services/media/media_fetch_service.dart';
 import 'package:aves/services/media/media_session_service.dart';
 import 'package:aves/services/media/media_store_service.dart';
-import 'package:aves/services/media/webdav_fetch_service.dart';
+import 'package:aves/services/media/cloud_fetch_service.dart';
 import 'package:aves/services/metadata/metadata_edit_service.dart';
 import 'package:aves/services/metadata/metadata_fetch_service.dart';
 import 'package:aves/services/security_service.dart';
@@ -72,7 +72,7 @@ void initPlatformServices() {
   getIt.registerLazySingleton<EmbeddedDataService>(PlatformEmbeddedDataService.new);
   getIt.registerLazySingleton<GeocodingService>(PlatformGeocodingService.new);
   getIt.registerLazySingleton<MediaEditService>(PlatformMediaEditService.new);
-  getIt.registerLazySingleton<MediaFetchService>(() => WebDavAwareMediaFetchService(PlatformMediaFetchService()));
+  getIt.registerLazySingleton<MediaFetchService>(() => CloudAwareMediaFetchService(PlatformMediaFetchService()));
   getIt.registerLazySingleton<MediaSessionService>(PlatformMediaSessionService.new);
   getIt.registerLazySingleton<MediaStoreService>(PlatformMediaStoreService.new);
   getIt.registerLazySingleton<MetadataEditService>(PlatformMetadataEditService.new);

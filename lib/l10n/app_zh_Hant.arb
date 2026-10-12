@@ -1017,5 +1017,21 @@
     "webdavOrientationLandscape": "橫向",
     "webdavJumpToPath": "跳至路徑",
     "webdavPathHint": "資料夾路徑，例如 folder/subfolder",
-    "webdavActionGo": "跳至"
+    "webdavActionGo": "跳至",
+    "cloudTitle": "雲端服務",
+    "cloudServersPageTitle": "雲端服務",
+    "cloudAddService": "新增服務",
+    "cloudAddWebDav": "新增 WebDAV",
+    "cloudAddSmb": "新增 SMB",
+    "cloudRemoveServer": "移除服務",
+    "cloudEmptyServers": "尚未設定任何服務",
+    "cloudServerAddress": "伺服器位址",
+    "cloudSmbAddress": "SMB 位址",
+    "cloudSmbDomain": "網域（選填）",
+    "cloudTypeWebDav": "WebDAV",
+    "cloudTypeSmb": "SMB / Windows 共用",
+    "cloudTypeWebDavHint": "WebDAV 伺服器，如 AList、Nextcloud",
+    "cloudTypeSmbHint": "Windows / NAS 網路共用",
+    "cloudSortNameAsc": "名稱升冪（A→Z）",
+    "cloudSortNameDesc": "名稱降冪（Z→A）"
 }

@@ -5,11 +5,11 @@ import 'package:aves/model/entry/entry.dart';
 import 'package:aves/model/entry/extensions/props.dart';
 import 'package:aves/model/entry/origins.dart';
 import 'package:aves/model/settings/settings.dart';
-import 'package:aves/model/source/webdav/webdav_resource.dart';
-import 'package:aves/model/source/webdav/webdav_server.dart';
+import 'package:aves/model/source/cloud/cloud_resource.dart';
+import 'package:aves/model/source/cloud/cloud_server.dart';
 import 'package:aves/ref/mime_types.dart';
-import 'package:aves/services/common/webdav_registry.dart';
-import 'package:aves/services/media/webdav_fetch_service.dart';
+import 'package:aves/services/common/cloud_registry.dart';
+import 'package:aves/services/media/cloud_fetch_service.dart';
 import 'package:aves/theme/icons.dart';
 import 'package:aves/widgets/common/basic/draggable_scrollbar/scrollbar.dart';
 import 'package:aves/widgets/common/basic/scaffold.dart';
@@ -19,36 +19,36 @@ import 'package:aves/widgets/common/identity/empty.dart';
 import 'package:aves/widgets/common/identity/scroll_thumb.dart';
 import 'package:aves/widgets/common/thumbnail/image.dart';
 import 'package:aves/widgets/navigation/drawer/app_drawer.dart';
-import 'package:aves/widgets/webdav/webdav_video_page.dart';
-import 'package:aves/widgets/webdav/webdav_view_options.dart';
-import 'package:aves/widgets/webdav/webdav_viewer_page.dart';
+import 'package:aves/widgets/cloud/cloud_video_page.dart';
+import 'package:aves/widgets/cloud/cloud_view_options.dart';
+import 'package:aves/widgets/cloud/cloud_viewer_page.dart';
 import 'package:aves_model/aves_model.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 enum _LoadState { loading, ready, error }
 
-class WebDavBrowserPage extends StatefulWidget {
-  static const routeName = '/webdav/browse';
+class CloudBrowserPage extends StatefulWidget {
+  static const routeName = '/cloud/browse';
   static const double addressBarHeight = 42;
 
-  final WebDavServer server;
+  final CloudServer server;
   final String? initialUrl;
 
   const new({super.key, required this.server, this.initialUrl});
 
   @override
-  State<WebDavBrowserPage> createState() => _WebDavBrowserPageState();
+  State<CloudBrowserPage> createState() => _CloudBrowserPageState();
 }
 
-class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
+class _CloudBrowserPageState extends State<CloudBrowserPage> {
   static const int _maxProbeCount = 400;
   static const int _probeConcurrency = 4;
   static const double _mosaicSpacing = 4;
 
   final ValueNotifier<_LoadState> _state = ValueNotifier(_LoadState.loading);
   final ValueNotifier<String> _error = ValueNotifier('');
-  final ValueNotifier<List<WebDavResource>> _folders = ValueNotifier([]);
+  final ValueNotifier<List<CloudResource>> _folders = ValueNotifier([]);
   final ValueNotifier<List<AvesEntry>> _media = ValueNotifier([]);
   final ValueNotifier<bool> _isScrolling = ValueNotifier(false);
   final ScrollController _scrollController = ScrollController();
@@ -82,8 +82,8 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     _currentUrl = widget.initialUrl ?? _baseUrl;
     _history = _ancestorsFor(_currentUrl);
     _scrollController.addListener(_onScroll);
-    _settingsSub = settings.updateStream.where((event) => event.key == SettingKeys.webDavLayoutKey).listen((_) {
-      if (settings.webDavLayout == 'mosaic') {
+    _settingsSub = settings.updateStream.where((event) => event.key == SettingKeys.cloudLayoutKey).listen((_) {
+      if (settings.cloudLayout == 'mosaic') {
         _maybeProbe(_media.value, 'mosaic');
       }
     });
@@ -114,7 +114,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
       _isScrolling.value = false;
     });
 
-    if (!settings.webDavImmersive) {
+    if (!settings.cloudImmersive) {
       if (_immersive) setState(() => _immersive = false);
       return;
     }
@@ -203,6 +203,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
   void _navigateTo(String url) {
     if (url == _currentUrl) return;
     _rememberScrollPosition();
+    settings.markCloudFolderVisited(url);
     setState(() {
       _currentUrl = url;
       _history = _ancestorsFor(url);
@@ -215,6 +216,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     if (_history.isEmpty) return;
     _rememberScrollPosition();
     final parent = _history.removeLast();
+    settings.markCloudFolderVisited(parent);
     setState(() {
       _currentUrl = parent;
       _immersive = false;
@@ -229,7 +231,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     _media.value = [];
     _probeGeneration++;
     try {
-      final client = webDavRegistry.clientForServer(widget.server);
+      final client = cloudRegistry.clientForServer(widget.server);
       if (client == null) {
         throw StateError('server not found');
       }
@@ -250,8 +252,8 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
       _media.value = media;
       _state.value = _LoadState.ready;
 
-      if (settings.webDavLastServerId != widget.server.id || settings.webDavLastUrl != url) {
-        settings.setWebDavLastLocation(widget.server.id, url);
+      if (settings.cloudLastServerId != widget.server.id || settings.cloudLastUrl != url) {
+        settings.setCloudLastLocation(widget.server.id, url);
       }
 
       _restoreScrollPosition(url);
@@ -260,7 +262,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
           _addressScrollController.jumpTo(_addressScrollController.position.maxScrollExtent);
         }
       });
-      _maybeProbe(media, settings.webDavLayout);
+      _maybeProbe(media, settings.cloudLayout);
     } catch (error) {
       if (!mounted || url != _currentUrl) return;
       _error.value = error.toString();
@@ -286,7 +288,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
         if (generation != _probeGeneration) return;
         final i = index++;
         if (i >= pending.length) return;
-        final aspect = await webDavImageLoader.probeAspect(pending[i]);
+        final aspect = await cloudImageLoader.probeAspect(pending[i]);
         if (generation != _probeGeneration) return;
         if (aspect != null) {
           _aspects[pending[i]] = aspect;
@@ -310,7 +312,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
   double _aspectOf(AvesEntry entry) => (entry.isVideo ? 16 / 9 : (_aspects[entry.uri] ?? 1.0)).clamp(0.35, 2.6);
 
   void _onScaleStart(ScaleStartDetails details) {
-    _scaleStartColumns = settings.webDavColumns;
+    _scaleStartColumns = settings.cloudColumns;
   }
 
   void _onScaleUpdate(ScaleUpdateDetails details) {
@@ -318,12 +320,12 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     final scale = details.scale;
     if (scale <= 0) return;
     final columns = (_scaleStartColumns / scale).clamp(1.5, 8.0);
-    if ((columns - settings.webDavColumns).abs() >= 0.02) {
-      settings.webDavColumns = columns;
+    if ((columns - settings.cloudColumns).abs() >= 0.02) {
+      settings.cloudColumns = columns;
     }
   }
 
-  AvesEntry _entryFromResource(WebDavResource resource, String mimeType, int id) {
+  AvesEntry _entryFromResource(CloudResource resource, String mimeType, int id) {
     return AvesEntry(
       id: id,
       uri: resource.url,
@@ -343,11 +345,11 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
       sourceDateTakenMillis: null,
       durationMillis: null,
       trashed: false,
-      origin: EntryOrigins.webDav,
+      origin: widget.server.isSmb ? EntryOrigins.smb : EntryOrigins.webDav,
     );
   }
 
-  static String _mimeForResource(WebDavResource resource) {
+  static String _mimeForResource(CloudResource resource) {
     if (resource.isCollection) return 'application/octet-stream';
     final reported = resource.mimeType;
     if (reported != null && (MimeTypes.isImage(reported) || MimeTypes.isVideo(reported))) {
@@ -382,18 +384,20 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     return 'application/octet-stream';
   }
 
-  void _openFolder(WebDavResource folder) => _navigateTo(folder.url);
+  void _openFolder(CloudResource folder) => _navigateTo(folder.url);
 
-  void _openEntry(List<AvesEntry> visibleEntries, AvesEntry entry) {
+  Future<void> _openEntry(List<AvesEntry> visibleEntries, AvesEntry entry) async {
     if (entry.isVideo) {
-      // the video backend streams the file itself, so give it an authenticated URL
-      final playableUrl = webDavRegistry.authenticatedUrl(entry.uri);
+      // the video backend streams the file itself, so hand it a URL it can
+      // consume: an authenticated URL for WebDAV, a loopback bridge for SMB
+      final playableUrl = await cloudRegistry.playbackUrl(entry.uri);
+      if (!mounted) return;
       final playableEntry = playableUrl == entry.uri ? entry : entry.copyWith(uri: playableUrl);
       Navigator.push(
         context,
         MaterialPageRoute(
-          settings: const RouteSettings(name: WebDavVideoPage.routeName),
-          builder: (context) => WebDavVideoPage(entry: playableEntry),
+          settings: const RouteSettings(name: CloudVideoPage.routeName),
+          builder: (context) => CloudVideoPage(entry: playableEntry),
         ),
       );
       return;
@@ -405,8 +409,8 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        settings: const RouteSettings(name: WebDavViewerPage.routeName),
-        builder: (context) => WebDavViewerPage(entries: images, initialIndex: imageIndex),
+        settings: const RouteSettings(name: CloudViewerPage.routeName),
+        builder: (context) => CloudViewerPage(entries: images, initialIndex: imageIndex),
       ),
     );
   }
@@ -458,7 +462,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
         body: ValueListenableBuilder<_LoadState>(
           valueListenable: _state,
           builder: (context, state, child) {
-            return ValueListenableBuilder<List<WebDavResource>>(
+            return ValueListenableBuilder<List<CloudResource>>(
               valueListenable: _folders,
               builder: (context, folders, child) {
                 return ValueListenableBuilder<List<AvesEntry>>(
@@ -473,20 +477,25 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     );
   }
 
-  Widget _buildScrollView(BuildContext context, {required _LoadState state, required List<WebDavResource> folders, required List<AvesEntry> media}) {
-    final layout = context.select<Settings, String>((s) => s.webDavLayout);
-    final columns = context.select<Settings, double>((s) => s.webDavColumns);
-    final mediaFilter = context.select<Settings, String>((s) => s.webDavMediaFilter);
-    final showNames = context.select<Settings, bool>((s) => s.webDavShowNames);
-    final immersiveEnabled = context.select<Settings, bool>((s) => s.webDavImmersive);
+  Widget _buildScrollView(BuildContext context, {required _LoadState state, required List<CloudResource> folders, required List<AvesEntry> media}) {
+    final layout = context.select<Settings, String>((s) => s.cloudLayout);
+    final columns = context.select<Settings, double>((s) => s.cloudColumns);
+    final mediaFilter = context.select<Settings, String>((s) => s.cloudMediaFilter);
+    final showNames = context.select<Settings, bool>((s) => s.cloudShowNames);
+    final immersiveEnabled = context.select<Settings, bool>((s) => s.cloudImmersive);
     final topInset = MediaQuery.paddingOf(context).top;
-    final headerHeight = topInset + kToolbarHeight + WebDavBrowserPage.addressBarHeight;
+    final headerHeight = topInset + kToolbarHeight + CloudBrowserPage.addressBarHeight;
+
+    final sort = context.select<Settings, String>((s) => s.cloudSort);
+    final descending = sort == 'nameDesc';
 
     final visible = switch (mediaFilter) {
       'image' => media.where((e) => e.isImage).toList(),
       'video' => media.where((e) => e.isVideo).toList(),
       _ => media,
     };
+    final sortedFolders = _sortByName(folders, (f) => f.name, descending);
+    final sortedVisible = _sortByName(visible, (e) => e.sourceTitle ?? e.bestTitle ?? '', descending);
 
     final List<Widget> contentSlivers;
     if (state == _LoadState.loading) {
@@ -508,18 +517,18 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
           ),
         ),
       ];
-    } else if (folders.isEmpty && visible.isEmpty) {
+    } else if (sortedFolders.isEmpty && sortedVisible.isEmpty) {
       contentSlivers = [SliverFillRemaining(hasScrollBody: false, child: EmptyContent(icon: AIcons.folder, text: context.l10n.webdavEmptyFolder))];
     } else {
       contentSlivers = [
-        if (folders.isNotEmpty) _buildFolderSliver(context, folders),
-        if (visible.isNotEmpty)
+        if (sortedFolders.isNotEmpty) _buildFolderSliver(context, sortedFolders),
+        if (sortedVisible.isNotEmpty)
           if (layout == 'mosaic')
-            ..._buildMosaicSlivers(context, visible, columns, showNames)
+            ..._buildMosaicSlivers(context, sortedVisible, columns, showNames)
           else if (layout == 'list')
-            _buildListSliver(context, visible, showNames)
+            _buildListSliver(context, sortedVisible, showNames)
           else
-            _buildGridSliver(context, visible, columns, showNames),
+            _buildGridSliver(context, sortedVisible, columns, showNames),
         const SliverToBoxAdapter(child: SizedBox(height: 8)),
       ];
     }
@@ -580,13 +589,18 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
       title: Text(_folderName, maxLines: 1, overflow: TextOverflow.ellipsis),
       actions: [
         IconButton(
+          tooltip: settings.cloudSort == 'nameDesc' ? context.l10n.cloudSortNameDesc : context.l10n.cloudSortNameAsc,
+          icon: Icon(settings.cloudSort == 'nameDesc' ? AIcons.sortOrder : AIcons.sort),
+          onPressed: () => settings.cloudSort = settings.cloudSort == 'nameDesc' ? 'nameAsc' : 'nameDesc',
+        ),
+        IconButton(
           tooltip: context.l10n.webdavViewOptions,
           icon: const Icon(AIcons.layout),
-          onPressed: () => showWebDavViewOptions(context),
+          onPressed: () => showCloudViewOptions(context),
         ),
       ],
       bottom: PreferredSize(
-        preferredSize: const Size.fromHeight(WebDavBrowserPage.addressBarHeight),
+        preferredSize: const Size.fromHeight(CloudBrowserPage.addressBarHeight),
         child: _buildAddressBar(context),
       ),
     );
@@ -596,12 +610,12 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     final crumbs = _breadcrumbs();
     final atRoot = crumbs.isEmpty;
     return SizedBox(
-      height: WebDavBrowserPage.addressBarHeight,
+      height: CloudBrowserPage.addressBarHeight,
       child: Row(
         children: [
           IconButton(
             tooltip: widget.server.displayName,
-            icon: const Icon(AIcons.cloud),
+            icon: Icon(widget.server.isSmb ? Icons.storage_rounded : AIcons.cloud),
             onPressed: atRoot ? null : () => _navigateTo(_baseUrl),
           ),
           Expanded(
@@ -653,18 +667,28 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     );
   }
 
-  Widget _buildFolderSliver(BuildContext context, List<WebDavResource> folders) {
+  Widget _buildFolderSliver(BuildContext context, List<CloudResource> folders) {
+    // folders already opened once are dimmed
+    final visited = settings.cloudVisitedFolders.toSet();
+    final disabledColor = Theme.of(context).disabledColor;
     return SliverList.builder(
       itemCount: folders.length,
       itemBuilder: (context, index) {
         final folder = folders[index];
+        final isVisited = visited.contains(folder.url);
+        final color = isVisited ? disabledColor : null;
         return ListTile(
-          leading: const Icon(AIcons.folder),
-          title: Text(folder.name),
+          leading: Icon(AIcons.folder, color: color),
+          title: Text(folder.name, style: TextStyle(color: color)),
           onTap: () => _openFolder(folder),
         );
       },
     );
+  }
+
+  static List<T> _sortByName<T>(List<T> items, String Function(T) nameOf, bool descending) {
+    final sorted = [...items]..sort((a, b) => nameOf(a).toLowerCase().compareTo(nameOf(b).toLowerCase()));
+    return descending ? sorted.reversed.toList() : sorted;
   }
 
   Widget _buildListSliver(BuildContext context, List<AvesEntry> entries, bool showNames) {
@@ -710,7 +734,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
         itemCount: entries.length,
         itemBuilder: (context, index) {
           final entry = entries[index];
-          return _WebDavTile(
+          return _CloudTile(
             key: ValueKey(entry.uri),
             entry: entry,
             extent: width / crossAxisCount,
@@ -772,7 +796,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
                     SizedBox(
                       width: _aspectOf(entries[indices[k]]) * height,
                       height: height,
-                      child: _WebDavTile(
+                      child: _CloudTile(
                         key: ValueKey(entries[indices[k]].uri),
                         entry: entries[indices[k]],
                         extent: math.max(_aspectOf(entries[indices[k]]) * height, 48),
@@ -808,7 +832,7 @@ class _VideoPlaceholder extends StatelessWidget {
   }
 }
 
-class _WebDavTile extends StatelessWidget {
+class _CloudTile extends StatelessWidget {
   final AvesEntry entry;
   final double extent;
   final double devicePixelRatio;

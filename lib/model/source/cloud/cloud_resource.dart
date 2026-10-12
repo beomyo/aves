@@ -1,6 +1,6 @@
 import 'package:equatable/equatable.dart';
 
-class WebDavResource extends Equatable {
+class CloudResource extends Equatable {
   // absolute URL used for requests
   final String url;
   // decoded last path segment, used for display
