@@ -3,24 +3,27 @@ import 'package:aves/theme/icons.dart';
 import 'package:aves/widgets/common/extensions/build_context.dart';
 import 'package:material_ui/material_ui.dart';
 
-Future<void> showCloudViewOptions(BuildContext context) {
+Future<void> showCloudViewOptions(BuildContext context, {required String url, required bool video}) {
   return showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
-    builder: (context) => const CloudViewOptionsSheet(),
+    builder: (context) => CloudViewOptionsSheet(url: url, video: video),
   );
 }
 
-// all the view related options, gathered behind the app bar "view" button.
-// reads the global `settings` directly (no `Provider` lookup) so that it also
+// All the view related options, gathered behind the app bar "view" button.
+// Reads the global `settings` directly (no `Provider` lookup) so that it also
 // works when shown from a separate modal route.
 class CloudViewOptionsSheet extends StatelessWidget {
   static const List<String> layoutValues = ['mosaic', 'grid', 'list'];
   static const List<String> mediaValues = ['all', 'image', 'video'];
   static const List<String> sortValues = ['nameAsc', 'nameDesc'];
 
-  const new({super.key});
+  final String url;
+  final bool video;
+
+  const new({super.key, required this.url, required this.video});
 
   static IconData layoutIcon(String layout) => switch (layout) {
     'mosaic' => AIcons.layoutMosaic,
@@ -54,12 +57,17 @@ class CloudViewOptionsSheet extends StatelessWidget {
     return ListenableBuilder(
       listenable: settings,
       builder: (context, child) {
-        final layout = settings.cloudLayout;
+        final currentLayout = settings.cloudLayoutFor(url, video: video);
+        final imageLayout = settings.cloudImageLayout;
+        final videoLayout = settings.cloudVideoLayout;
+        final perFolder = settings.cloudLayoutPerFolder;
         final columns = settings.cloudColumns;
         final media = settings.cloudMediaFilter;
-        final showNames = settings.cloudShowNames;
-        final immersive = settings.cloudImmersive;
         final sort = settings.cloudSort;
+        final showNames = settings.cloudShowNames;
+        final showSizes = settings.cloudShowSizes;
+        final viewerThumbnails = settings.cloudViewerThumbnails;
+        final immersive = settings.cloudImmersive;
 
         return SafeArea(
           top: false,
@@ -67,28 +75,38 @@ class CloudViewOptionsSheet extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _sectionTitle(context, l10n.webdavLayout),
+                _sectionTitle(context, video ? l10n.cloudLayoutVideo : l10n.cloudLayoutCurrent),
                 _chips<String>(
                   values: layoutValues,
-                  selected: layout,
+                  selected: currentLayout,
                   label: (v) => layoutName(context, v),
                   icon: layoutIcon,
-                  onSelected: (v) => settings.cloudLayout = v,
+                  onSelected: (v) => settings.setCloudLayoutFor(url, v, video: video),
                 ),
-                if (layout != 'list') ...[
+                if (currentLayout != 'list') ...[
                   _sectionTitle(context, '${l10n.webdavColumnsTitle}  ${columns.round()}'),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     child: Slider(
-                      value: columns.clamp(1.5, 8),
-                      min: 1.5,
+                      value: columns.clamp(1, 8),
+                      min: 1,
                       max: 8,
-                      divisions: 13,
+                      divisions: 14,
                       label: '${columns.round()}',
                       onChanged: (v) => settings.cloudColumns = v,
                     ),
                   ),
                 ],
+                _sectionTitle(context, l10n.cloudDefaultViews),
+                _chipRow(context, l10n.cloudDefaultImage, imageLayout, (v) => settings.cloudImageLayout = v),
+                const SizedBox(height: 8),
+                _chipRow(context, l10n.cloudDefaultVideo, videoLayout, (v) => settings.cloudVideoLayout = v),
+                SwitchListTile(
+                  title: Text(l10n.cloudLayoutPerFolder),
+                  value: perFolder,
+                  onChanged: (v) => settings.cloudLayoutPerFolder = v,
+                ),
+                const Divider(height: 24),
                 _sectionTitle(context, l10n.webdavMediaType),
                 _chips<String>(
                   values: mediaValues,
@@ -112,6 +130,16 @@ class CloudViewOptionsSheet extends StatelessWidget {
                   onChanged: (v) => settings.cloudShowNames = v,
                 ),
                 SwitchListTile(
+                  title: Text(l10n.cloudShowFileSizes),
+                  value: showSizes,
+                  onChanged: (v) => settings.cloudShowSizes = v,
+                ),
+                SwitchListTile(
+                  title: Text(l10n.cloudViewerThumbnails),
+                  value: viewerThumbnails,
+                  onChanged: (v) => settings.cloudViewerThumbnails = v,
+                ),
+                SwitchListTile(
                   title: Text(l10n.webdavImmersive),
                   value: immersive,
                   onChanged: (v) => settings.cloudImmersive = v,
@@ -129,6 +157,32 @@ class CloudViewOptionsSheet extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Text(text, style: Theme.of(context).textTheme.titleSmall),
+    );
+  }
+
+  Widget _chipRow(BuildContext context, String label, String selected, ValueChanged<String> onSelected) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final value in layoutValues)
+                ChoiceChip(
+                  avatar: Icon(layoutIcon(value), size: 18),
+                  label: Text(layoutName(context, value)),
+                  selected: value == selected,
+                  onSelected: (_) => onSelected(value),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 

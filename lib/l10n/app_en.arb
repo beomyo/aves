@@ -1204,6 +1204,14 @@
   "cloudTypeWebDavHint": "WebDAV server, e.g. AList, Nextcloud",
   "cloudTypeSmbHint": "Windows / NAS network share",
   "cloudSort": "Sort",
+  "cloudLayoutCurrent": "Layout of this folder",
+  "cloudLayoutVideo": "Layout of this video folder",
+  "cloudDefaultViews": "Default views",
+  "cloudDefaultImage": "Images",
+  "cloudDefaultVideo": "Videos",
+  "cloudLayoutPerFolder": "Remember layout per folder",
+  "cloudShowFileSizes": "Show file sizes",
+  "cloudViewerThumbnails": "Thumbnail strip in the viewer",
   "cloudSortNameAsc": "Name (A to Z)",
   "cloudSortNameDesc": "Name (Z to A)"
 }

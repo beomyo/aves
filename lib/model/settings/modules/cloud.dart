@@ -28,10 +28,57 @@ mixin CloudSettings on SettingsAccess {
 
   set cloudColumns(double newValue) => set(SettingKeys.cloudColumnsKey, newValue);
 
-  // one of `grid`, `list`, `mosaic`
-  String get cloudLayout => getString(SettingKeys.cloudLayoutKey) ?? 'grid';
+  // one of `grid`, `list`, `mosaic`; used when a folder has no saved layout
+  // (or when per-folder layouts are disabled)
 
-  set cloudLayout(String newValue) => set(SettingKeys.cloudLayoutKey, newValue);
+  // default layout for folders containing images (and mixed content)
+  String get cloudImageLayout => getString(SettingKeys.cloudImageLayoutKey) ?? 'mosaic';
+
+  set cloudImageLayout(String newValue) => set(SettingKeys.cloudImageLayoutKey, newValue);
+
+  // default layout for folders that only contain videos
+  String get cloudVideoLayout => getString(SettingKeys.cloudVideoLayoutKey) ?? 'list';
+
+  set cloudVideoLayout(String newValue) => set(SettingKeys.cloudVideoLayoutKey, newValue);
+
+  // whether the layout chosen in a folder is remembered for that folder
+  bool get cloudLayoutPerFolder => getBool(SettingKeys.cloudLayoutPerFolderKey) ?? false;
+
+  set cloudLayoutPerFolder(bool newValue) => set(SettingKeys.cloudLayoutPerFolderKey, newValue);
+
+  Map<String, String> get _cloudFolderLayouts {
+    final stored = getStringList(SettingKeys.cloudFolderLayoutsKey) ?? const [];
+    final map = <String, String>{};
+    for (final entry in stored) {
+      final index = entry.lastIndexOf('\t');
+      if (index <= 0) continue;
+      map[entry.substring(0, index)] = entry.substring(index + 1);
+    }
+    return map;
+  }
+
+  void _setCloudFolderLayouts(Map<String, String> map) => set(SettingKeys.cloudFolderLayoutsKey, [for (final e in map.entries) '${e.key}\t${e.value}']);
+
+  // effective layout for a folder
+  String cloudLayoutFor(String url, {required bool video}) {
+    if (cloudLayoutPerFolder) {
+      final saved = _cloudFolderLayouts[url];
+      if (saved != null) return saved;
+    }
+    return video ? cloudVideoLayout : cloudImageLayout;
+  }
+
+  // records the layout picked by the user: per folder when that is enabled,
+  // otherwise as the default for the current media kind
+  void setCloudLayoutFor(String url, String layout, {required bool video}) {
+    if (cloudLayoutPerFolder && url.isNotEmpty) {
+      _setCloudFolderLayouts({..._cloudFolderLayouts, url: layout});
+    } else if (video) {
+      cloudVideoLayout = layout;
+    } else {
+      cloudImageLayout = layout;
+    }
+  }
 
   // one of `all`, `image`, `video`
   String get cloudMediaFilter => getString(SettingKeys.cloudMediaFilterKey) ?? 'all';
@@ -41,6 +88,15 @@ mixin CloudSettings on SettingsAccess {
   bool get cloudShowNames => getBool(SettingKeys.cloudShowNamesKey) ?? false;
 
   set cloudShowNames(bool newValue) => set(SettingKeys.cloudShowNamesKey, newValue);
+
+  bool get cloudShowSizes => getBool(SettingKeys.cloudShowSizesKey) ?? false;
+
+  set cloudShowSizes(bool newValue) => set(SettingKeys.cloudShowSizesKey, newValue);
+
+  // show the thumbnail strip at the bottom of the image viewer
+  bool get cloudViewerThumbnails => getBool(SettingKeys.cloudViewerThumbnailsKey) ?? true;
+
+  set cloudViewerThumbnails(bool newValue) => set(SettingKeys.cloudViewerThumbnailsKey, newValue);
 
   // hide the app bar, address bar and layout bar while scrolling down
   bool get cloudImmersive => getBool(SettingKeys.cloudImmersiveKey) ?? true;
@@ -52,19 +108,53 @@ mixin CloudSettings on SettingsAccess {
 
   set cloudSort(String newValue) => set(SettingKeys.cloudSortKey, newValue);
 
-  // URLs of folders already opened, rendered dimmed in the browser
-  List<String> get cloudVisitedFolders => getStringList(SettingKeys.cloudVisitedFoldersKey) ?? const [];
+  // URLs of folders already opened and of media already played, rendered dimmed
+  List<String> get cloudVisited => getStringList(SettingKeys.cloudVisitedFoldersKey) ?? const [];
 
-  set cloudVisitedFolders(List<String> newValue) => set(SettingKeys.cloudVisitedFoldersKey, newValue);
+  set cloudVisited(List<String> newValue) => set(SettingKeys.cloudVisitedFoldersKey, newValue);
 
-  bool isCloudFolderVisited(String url) => cloudVisitedFolders.contains(url);
+  bool isCloudVisited(String url) => cloudVisited.contains(url);
 
-  void markCloudFolderVisited(String url) {
+  void markCloudVisited(String url) {
     if (url.isEmpty) return;
-    final current = cloudVisitedFolders;
+    final current = cloudVisited;
     if (current.contains(url)) return;
     final next = [...current, url];
-    cloudVisitedFolders = next.length > 4000 ? next.sublist(next.length - 4000) : next;
+    cloudVisited = next.length > 4000 ? next.sublist(next.length - 4000) : next;
+  }
+
+  // last playback position and duration of each video (milliseconds), so it
+  // can both resume and show a progress bar on the tile
+  Map<String, (int, int)> get _cloudVideoPositions {
+    final stored = getStringList(SettingKeys.cloudVideoPositionsKey) ?? const [];
+    final map = <String, (int, int)>{};
+    for (final entry in stored) {
+      final parts = entry.split('\t');
+      if (parts.length < 3) continue;
+      final position = int.tryParse(parts[parts.length - 2]);
+      final duration = int.tryParse(parts[parts.length - 1]);
+      if (position == null || duration == null) continue;
+      map[parts.sublist(0, parts.length - 2).join('\t')] = (position, duration);
+    }
+    return map;
+  }
+
+  int? cloudVideoPosition(String url) => _cloudVideoPositions[url]?.$1;
+
+  int? cloudVideoDuration(String url) => _cloudVideoPositions[url]?.$2;
+
+  void setCloudVideoProgress(String url, int positionMillis, int durationMillis) {
+    if (url.isEmpty) return;
+    final map = _cloudVideoPositions;
+    if (positionMillis <= 0) {
+      if (map.remove(url) == null) return;
+    } else {
+      final current = map[url];
+      if (current != null && current.$1 == positionMillis && current.$2 == durationMillis) return;
+      map[url] = (positionMillis, durationMillis);
+    }
+    final entries = map.entries.take(4000).toList();
+    set(SettingKeys.cloudVideoPositionsKey, [for (final e in entries) '${e.key}\t${e.value.$1}\t${e.value.$2}']);
   }
 
   // last opened location, to restore the page on the next launch

@@ -170,11 +170,18 @@ class SettingKeys {
   static const cloudServersKey = 'cloud_servers';
   static const cloudColumnsKey = 'cloud_columns';
   static const cloudLayoutKey = 'cloud_layout';
+  static const cloudImageLayoutKey = 'cloud_image_layout';
+  static const cloudVideoLayoutKey = 'cloud_video_layout';
+  static const cloudLayoutPerFolderKey = 'cloud_layout_per_folder';
+  static const cloudFolderLayoutsKey = 'cloud_folder_layouts';
   static const cloudMediaFilterKey = 'cloud_media_filter';
   static const cloudShowNamesKey = 'cloud_show_names';
+  static const cloudShowSizesKey = 'cloud_show_sizes';
   static const cloudImmersiveKey = 'cloud_immersive';
+  static const cloudViewerThumbnailsKey = 'cloud_viewer_thumbnails';
   static const cloudSortKey = 'cloud_sort';
   static const cloudVisitedFoldersKey = 'cloud_visited_folders';
+  static const cloudVideoPositionsKey = 'cloud_video_positions';
   static const cloudLastServerIdKey = 'cloud_last_server_id';
   static const cloudLastUrlKey = 'cloud_last_url';
 

@@ -11,6 +11,7 @@ import 'package:aves/ref/mime_types.dart';
 import 'package:aves/services/common/cloud_registry.dart';
 import 'package:aves/services/media/cloud_fetch_service.dart';
 import 'package:aves/theme/icons.dart';
+import 'package:aves/utils/file_utils.dart';
 import 'package:aves/widgets/common/basic/draggable_scrollbar/scrollbar.dart';
 import 'package:aves/widgets/common/basic/scaffold.dart';
 import 'package:aves/widgets/common/behaviour/eager_scale_gesture_recognizer.dart';
@@ -21,6 +22,7 @@ import 'package:aves/widgets/common/thumbnail/image.dart';
 import 'package:aves/widgets/navigation/drawer/app_drawer.dart';
 import 'package:aves/widgets/cloud/cloud_server_list_page.dart';
 import 'package:aves/widgets/cloud/cloud_video_page.dart';
+import 'package:aves/widgets/cloud/cloud_video_thumbnail.dart';
 import 'package:aves/widgets/cloud/cloud_view_options.dart';
 import 'package:aves/widgets/cloud/cloud_viewer_page.dart';
 import 'package:aves_model/aves_model.dart';
@@ -83,11 +85,20 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     _currentUrl = widget.initialUrl ?? _baseUrl;
     _history = _ancestorsFor(_currentUrl);
     _scrollController.addListener(_onScroll);
-    _settingsSub = settings.updateStream.where((event) => event.key == SettingKeys.cloudLayoutKey).listen((_) {
-      if (settings.cloudLayout == 'mosaic') {
-        _maybeProbe(_media.value, 'mosaic');
-      }
-    });
+    _settingsSub = settings.updateStream
+        .where(
+          (event) => const [
+            SettingKeys.cloudImageLayoutKey,
+            SettingKeys.cloudVideoLayoutKey,
+            SettingKeys.cloudFolderLayoutsKey,
+            SettingKeys.cloudLayoutPerFolderKey,
+          ].contains(event.key),
+        )
+        .listen((_) {
+          if (_resolvedLayout(_media.value) == 'mosaic') {
+            _maybeProbe(_media.value, 'mosaic');
+          }
+        });
     _fetch();
   }
 
@@ -204,7 +215,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   void _navigateTo(String url) {
     if (url == _currentUrl) return;
     _rememberScrollPosition();
-    settings.markCloudFolderVisited(url);
+    settings.markCloudVisited(url);
     setState(() {
       _currentUrl = url;
       _history = _ancestorsFor(url);
@@ -217,7 +228,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     if (_history.isEmpty) return;
     _rememberScrollPosition();
     final parent = _history.removeLast();
-    settings.markCloudFolderVisited(parent);
+    settings.markCloudVisited(parent);
     setState(() {
       _currentUrl = parent;
       _immersive = false;
@@ -263,7 +274,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
           _addressScrollController.jumpTo(_addressScrollController.position.maxScrollExtent);
         }
       });
-      _maybeProbe(media, settings.cloudLayout);
+      _maybeProbe(media, _resolvedLayout(media));
     } catch (error) {
       if (!mounted || url != _currentUrl) return;
       _error.value = error.toString();
@@ -320,7 +331,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     if (details.pointerCount < 2) return;
     final scale = details.scale;
     if (scale <= 0) return;
-    final columns = (_scaleStartColumns / scale).clamp(1.5, 8.0);
+    final columns = (_scaleStartColumns / scale).clamp(1.0, 8.0);
     if ((columns - settings.cloudColumns).abs() >= 0.02) {
       settings.cloudColumns = columns;
     }
@@ -400,18 +411,21 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
 
   Future<void> _openEntry(List<AvesEntry> visibleEntries, AvesEntry entry) async {
     if (entry.isVideo) {
+      // remember that this video was opened, and where we stopped watching
+      setState(() => settings.markCloudVisited(entry.uri));
       // the video backend streams the file itself, so hand it a URL it can
       // consume: an authenticated URL for WebDAV, a loopback bridge for SMB
       final playableUrl = await cloudRegistry.playbackUrl(entry.uri);
       if (!mounted) return;
       final playableEntry = playableUrl == entry.uri ? entry : entry.copyWith(uri: playableUrl);
-      Navigator.push(
+      await Navigator.push(
         context,
         MaterialPageRoute(
           settings: const RouteSettings(name: CloudVideoPage.routeName),
-          builder: (context) => CloudVideoPage(entry: playableEntry),
+          builder: (context) => CloudVideoPage(entry: playableEntry, storageUri: entry.uri),
         ),
       );
+      if (mounted) setState(() {});
       return;
     }
     final index = visibleEntries.indexOf(entry);
@@ -490,11 +504,15 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   }
 
   Widget _buildScrollView(BuildContext context, {required _LoadState state, required List<CloudResource> folders, required List<AvesEntry> media}) {
-    final layout = context.select<Settings, String>((s) => s.cloudLayout);
     final columns = context.select<Settings, double>((s) => s.cloudColumns);
     final mediaFilter = context.select<Settings, String>((s) => s.cloudMediaFilter);
     final showNames = context.select<Settings, bool>((s) => s.cloudShowNames);
+    final showSizes = context.select<Settings, bool>((s) => s.cloudShowSizes);
     final immersiveEnabled = context.select<Settings, bool>((s) => s.cloudImmersive);
+    // a folder holding only videos (or the "videos only" filter) uses the video
+    // default layout, everything else the image default
+    final videoMode = mediaFilter == 'video' || (mediaFilter == 'all' && media.isNotEmpty && media.every((e) => e.isVideo));
+    final layout = context.select<Settings, String>((s) => s.cloudLayoutFor(_currentUrl, video: videoMode));
     final topInset = MediaQuery.paddingOf(context).top;
     final headerHeight = topInset + kToolbarHeight + CloudBrowserPage.addressBarHeight;
 
@@ -536,11 +554,11 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
         if (sortedFolders.isNotEmpty) _buildFolderSliver(context, sortedFolders),
         if (sortedVisible.isNotEmpty)
           if (layout == 'mosaic')
-            ..._buildMosaicSlivers(context, sortedVisible, columns, showNames)
+            ..._buildMosaicSlivers(context, sortedVisible, columns, showNames, showSizes)
           else if (layout == 'list')
-            _buildListSliver(context, sortedVisible, showNames)
+            _buildListSliver(context, sortedVisible, showNames, showSizes)
           else
-            _buildGridSliver(context, sortedVisible, columns, showNames),
+            _buildGridSliver(context, sortedVisible, columns, showNames, showSizes),
         const SliverToBoxAdapter(child: SizedBox(height: 8)),
       ];
     }
@@ -576,7 +594,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
             controller: _scrollController,
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
-              _buildAppBar(context, immersiveEnabled),
+              _buildAppBar(context, immersiveEnabled, videoMode),
               ...contentSlivers,
             ],
           ),
@@ -585,7 +603,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     );
   }
 
-  Widget _buildAppBar(BuildContext context, bool immersiveEnabled) {
+  Widget _buildAppBar(BuildContext context, bool immersiveEnabled, bool videoMode) {
     return SliverAppBar(
       primary: true,
       pinned: !immersiveEnabled,
@@ -608,7 +626,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
         IconButton(
           tooltip: context.l10n.webdavViewOptions,
           icon: const Icon(AIcons.layout),
-          onPressed: () => showCloudViewOptions(context),
+          onPressed: () => showCloudViewOptions(context, url: _currentUrl, video: videoMode),
         ),
       ],
       bottom: PreferredSize(
@@ -681,7 +699,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
 
   Widget _buildFolderSliver(BuildContext context, List<CloudResource> folders) {
     // folders already opened once are dimmed
-    final visited = settings.cloudVisitedFolders.toSet();
+    final visited = settings.cloudVisited.toSet();
     final disabledColor = Theme.of(context).disabledColor;
     return SliverList.builder(
       itemCount: folders.length,
@@ -698,23 +716,48 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     );
   }
 
+  // effective layout of the current folder: video default for video-only
+  // content, image default otherwise, overridden by a per-folder choice
+  String _resolvedLayout(List<AvesEntry> media) {
+    final filter = settings.cloudMediaFilter;
+    final videoMode = filter == 'video' || (filter == 'all' && media.isNotEmpty && media.every((e) => e.isVideo));
+    return settings.cloudLayoutFor(_currentUrl, video: videoMode);
+  }
+
+  // watch progress (0..1) of a video, or null when unknown
+  static double? _progressOf(AvesEntry entry) {    if (!entry.isVideo) return null;
+    final position = settings.cloudVideoPosition(entry.uri);
+    final duration = settings.cloudVideoDuration(entry.uri);
+    if (position == null || duration == null || duration <= 0) return null;
+    return (position / duration).clamp(0.0, 1.0);
+  }
+
   static List<T> _sortByName<T>(List<T> items, String Function(T) nameOf, bool descending) {
     final sorted = [...items]..sort((a, b) => nameOf(a).toLowerCase().compareTo(nameOf(b).toLowerCase()));
     return descending ? sorted.reversed.toList() : sorted;
   }
 
-  Widget _buildListSliver(BuildContext context, List<AvesEntry> entries, bool showNames) {
+  Widget _buildListSliver(BuildContext context, List<AvesEntry> entries, bool showNames, bool showSizes) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
     return SliverList.builder(
       itemCount: entries.length,
       itemBuilder: (context, index) {
         final entry = entries[index];
+        final watched = entry.isVideo && settings.isCloudVisited(entry.uri);
+        final progress = _progressOf(entry);
+        final sizeBytes = entry.sizeBytes;
         return ListTile(
           leading: SizedBox(
             width: 56,
             height: 56,
             child: entry.isVideo
-                ? const _VideoPlaceholder()
+                ? CloudVideoThumbnail(
+                    entry: entry,
+                    extent: 56,
+                    devicePixelRatio: dpr,
+                    cancellableNotifier: _isScrolling,
+                    progress: progress,
+                  )
                 : ThumbnailImage(
                     entry: entry,
                     extent: 56,
@@ -723,7 +766,11 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
                     cancellableNotifier: _isScrolling,
                   ),
           ),
-          title: Text(entry.sourceTitle ?? entry.bestTitle ?? ''),
+          title: Text(
+            entry.sourceTitle ?? entry.bestTitle ?? '',
+            style: watched ? TextStyle(color: Theme.of(context).disabledColor) : null,
+          ),
+          subtitle: showSizes && sizeBytes != null ? Text(formatFileSize(settings.avesLocale, sizeBytes, round: 0)) : null,
           trailing: entry.isVideo ? const Icon(Icons.play_circle_outline, size: 20) : null,
           onTap: () => _openEntry(entries, entry),
         );
@@ -731,7 +778,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     );
   }
 
-  Widget _buildGridSliver(BuildContext context, List<AvesEntry> entries, double columns, bool showNames) {
+  Widget _buildGridSliver(BuildContext context, List<AvesEntry> entries, double columns, bool showNames, bool showSizes) {
     final crossAxisCount = columns.round().clamp(1, 10);
     final width = MediaQuery.sizeOf(context).width;
     final dpr = MediaQuery.devicePixelRatioOf(context);
@@ -753,6 +800,9 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
             devicePixelRatio: dpr,
             cancellableNotifier: _isScrolling,
             showName: showNames,
+            showSize: showSizes,
+            watched: entry.isVideo && settings.isCloudVisited(entry.uri),
+            progress: _progressOf(entry),
             onTap: () => _openEntry(entries, entry),
           );
         },
@@ -760,7 +810,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     );
   }
 
-  List<Widget> _buildMosaicSlivers(BuildContext context, List<AvesEntry> entries, double columns, bool showNames) {
+  List<Widget> _buildMosaicSlivers(BuildContext context, List<AvesEntry> entries, double columns, bool showNames, bool showSizes) {
     const spacing = _mosaicSpacing;
     final width = MediaQuery.sizeOf(context).width;
     final dpr = MediaQuery.devicePixelRatioOf(context);
@@ -815,6 +865,9 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
                         devicePixelRatio: dpr,
                         cancellableNotifier: _isScrolling,
                         showName: showNames,
+                        showSize: showSizes,
+                        watched: entries[indices[k]].isVideo && settings.isCloudVisited(entries[indices[k]].uri),
+                        progress: _progressOf(entries[indices[k]]),
                         isMosaic: true,
                         onTap: () => _openEntry(entries, entries[indices[k]]),
                       ),
@@ -830,20 +883,6 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   }
 }
 
-class _VideoPlaceholder extends StatelessWidget {
-  const new();
-
-  @override
-  Widget build(BuildContext context) {
-    return const ColoredBox(
-      color: Color(0x33000000),
-      child: Center(
-        child: Icon(Icons.play_circle_outline, color: Colors.white, size: 32),
-      ),
-    );
-  }
-}
-
 class _CloudTile extends StatelessWidget {
   final AvesEntry entry;
   final double extent;
@@ -851,6 +890,9 @@ class _CloudTile extends StatelessWidget {
   final ValueNotifier<bool> cancellableNotifier;
   final bool isMosaic;
   final bool showName;
+  final bool showSize;
+  final bool watched;
+  final double? progress;
   final VoidCallback onTap;
 
   const new({
@@ -862,12 +904,21 @@ class _CloudTile extends StatelessWidget {
     required this.onTap,
     this.isMosaic = false,
     this.showName = false,
+    this.showSize = false,
+    this.watched = false,
+    this.progress,
   });
 
   @override
   Widget build(BuildContext context) {
     Widget content = entry.isVideo
-        ? const _VideoPlaceholder()
+        ? CloudVideoThumbnail(
+            entry: entry,
+            extent: extent,
+            devicePixelRatio: devicePixelRatio,
+            cancellableNotifier: cancellableNotifier,
+            progress: progress,
+          )
         : ThumbnailImage(
             entry: entry,
             extent: extent,
@@ -877,7 +928,14 @@ class _CloudTile extends StatelessWidget {
             cancellableNotifier: cancellableNotifier,
             heroTag: null,
           );
-    if (showName) {
+    // videos already watched are dimmed
+    if (watched) {
+      content = Opacity(opacity: 0.55, child: content);
+    }
+    if (showName || showSize) {
+      final sizeBytes = entry.sizeBytes;
+      final sizeText = (showSize && sizeBytes != null) ? formatFileSize(settings.avesLocale, sizeBytes, round: 0) : null;
+      final nameText = showName ? (entry.sourceTitle ?? entry.bestTitle ?? '') : null;
       content = Stack(
         fit: StackFit.expand,
         children: [
@@ -894,11 +952,25 @@ class _CloudTile extends StatelessWidget {
                   colors: [Colors.transparent, Colors.black87],
                 ),
               ),
-              child: Text(
-                entry.sourceTitle ?? entry.bestTitle ?? '',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontSize: 11),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (nameText != null)
+                    Text(
+                      nameText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 11),
+                    ),
+                  if (sizeText != null)
+                    Text(
+                      sizeText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white70, fontSize: 10),
+                    ),
+                ],
               ),
             ),
           ),

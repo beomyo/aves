@@ -1034,6 +1034,14 @@
     "cloudTypeWebDavHint": "WebDAV 伺服器，如 AList、Nextcloud",
     "cloudTypeSmbHint": "Windows / NAS 網路共用",
     "cloudSort": "排序",
+    "cloudLayoutCurrent": "目前資料夾版面",
+    "cloudLayoutVideo": "目前影片資料夾版面",
+    "cloudDefaultViews": "預設檢視",
+    "cloudDefaultImage": "圖片",
+    "cloudDefaultVideo": "影片",
+    "cloudLayoutPerFolder": "個別記住每個資料夾的檢視",
+    "cloudShowFileSizes": "顯示檔案大小",
+    "cloudViewerThumbnails": "圖片檢視器縮圖列",
     "cloudSortNameAsc": "名稱升冪（A→Z）",
     "cloudSortNameDesc": "名稱降冪（Z→A）"
 }

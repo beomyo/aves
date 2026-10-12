@@ -807,6 +807,14 @@
     "cloudTypeWebDavHint": "WebDAV 服务器，如 AList、Nextcloud",
     "cloudTypeSmbHint": "Windows / NAS 网络共享",
     "cloudSort": "排序",
+    "cloudLayoutCurrent": "当前文件夹布局",
+    "cloudLayoutVideo": "当前视频文件夹布局",
+    "cloudDefaultViews": "默认视图",
+    "cloudDefaultImage": "图片",
+    "cloudDefaultVideo": "视频",
+    "cloudLayoutPerFolder": "单独记住每个文件夹的视图",
+    "cloudShowFileSizes": "显示文件大小",
+    "cloudViewerThumbnails": "图片浏览器缩略图条",
     "cloudSortNameAsc": "名称升序（A→Z）",
     "cloudSortNameDesc": "名称降序（Z→A）"
 }

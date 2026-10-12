@@ -14,15 +14,19 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
-// Minimal video player for remote (WebDAV) entries, reusing Aves' video stack.
-// The mpv backend opens `entry.uri` directly, so an http(s) URL plays as is.
+// Full screen video player for remote (WebDAV / SMB) entries, reusing Aves'
+// video stack. The mpv backend opens `entry.uri`, which is either an
+// authenticated URL or the loopback SMB bridge.
 class CloudVideoPage extends StatefulWidget {
   static const routeName = '/cloud/video';
   static const List<double> _speeds = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
   final AvesEntry entry;
 
-  const new({super.key, required this.entry});
+  // stable URL used as the key for the playback position
+  final String? storageUri;
+
+  const new({super.key, required this.entry, this.storageUri});
 
   @override
   State<CloudVideoPage> createState() => _CloudVideoPageState();
@@ -33,20 +37,31 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
   StreamSubscription<PlaybackStatus>? _statusSub;
   StreamSubscription<int>? _positionSub;
   final ValueNotifier<int> _position = ValueNotifier(0);
+  final TransformationController _transformationController = TransformationController();
   PlaybackStatus _status = PlaybackStatus.idle;
   bool _showControls = true;
   bool _keepScreenOn = false;
+  bool _zoomed = false;
+  bool _landscape = false;
   Timer? _hideTimer;
+  Timer? _progressTimer;
+
+  String get _storageUri => widget.storageUri ?? widget.entry.uri;
 
   @override
   void initState() {
     super.initState();
+    _transformationController.addListener(_onTransformChanged);
     _createController();
   }
 
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _progressTimer?.cancel();
+    _saveProgress();
+    _transformationController.removeListener(_onTransformChanged);
+    _transformationController.dispose();
     _statusSub?.cancel();
     _positionSub?.cancel();
     _position.dispose();
@@ -57,8 +72,27 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
     super.dispose();
   }
 
-  void _setOrientation(List<DeviceOrientation> orientations) {
-    SystemChrome.setPreferredOrientations(orientations);
+  void _onTransformChanged() {
+    final zoomed = _transformationController.value.getMaxScaleOnAxis() > 1.01;
+    if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
+  }
+
+  // remember where we stopped, so the video can resume later
+  void _saveProgress() {
+    final controller = _controller;
+    if (controller == null) return;
+    final duration = controller.duration;
+    final position = controller.currentPosition;
+    if (duration <= 0 || position <= 0) return;
+    // clear the resume point once the video is (almost) over
+    settings.setCloudVideoProgress(_storageUri, position >= duration - 2000 ? 0 : position, duration);
+  }
+
+  void _toggleOrientation() {
+    setState(() => _landscape = !_landscape);
+    SystemChrome.setPreferredOrientations(
+      _landscape ? const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight] : const [DeviceOrientation.portraitUp],
+    );
     _scheduleHideControls();
   }
 
@@ -81,10 +115,19 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
     _positionSub = controller.positionStream.listen((position) {
       if (mounted) _position.value = position;
     });
-    // the player opens the media paused, so wait until it is ready to start
-    controller.untilReady.then((_) {
-      if (mounted && identical(_controller, controller)) controller.play();
+    // the player opens the media paused, so wait until it is ready to resume
+    // where we stopped (if anywhere) and start
+    final resume = settings.cloudVideoPosition(_storageUri) ?? 0;
+    controller.untilReady.then((_) async {
+      if (!mounted || !identical(_controller, controller)) return;
+      final duration = controller.duration;
+      if (resume > 0 && (duration <= 0 || resume < duration - 2000)) {
+        await controller.seekTo(resume);
+      }
+      if (mounted && identical(_controller, controller)) unawaited(controller.play());
     });
+    _progressTimer?.cancel();
+    _progressTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
     _scheduleHideControls();
   }
 
@@ -128,14 +171,21 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          if (controller != null) Center(child: VideoView(entry: widget.entry, controller: controller)),
-          // tap to show/hide the controls
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _toggleControls,
+          if (controller != null)
+            Positioned.fill(
+              child: GestureDetector(
+                // tap toggles the controls, while two fingers pinch to zoom
+                behavior: HitTestBehavior.opaque,
+                onTap: _toggleControls,
+                child: InteractiveViewer(
+                  transformationController: _transformationController,
+                  minScale: 1,
+                  maxScale: 5,
+                  panEnabled: _zoomed,
+                  child: Center(child: VideoView(entry: widget.entry, controller: controller)),
+                ),
+              ),
             ),
-          ),
           if (controller != null && ready && !controller.isPlaying && _showControls)
             Center(
               child: IconButton(
@@ -206,16 +256,10 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
                   ),
                 ),
                 IconButton(
-                  tooltip: context.l10n.webdavOrientationPortrait,
-                  icon: const Icon(Icons.stay_current_portrait),
+                  tooltip: _landscape ? context.l10n.webdavOrientationPortrait : context.l10n.webdavOrientationLandscape,
+                  icon: Icon(_landscape ? Icons.stay_current_portrait : Icons.stay_current_landscape),
                   color: Colors.white,
-                  onPressed: () => _setOrientation(const [DeviceOrientation.portraitUp]),
-                ),
-                IconButton(
-                  tooltip: context.l10n.webdavOrientationLandscape,
-                  icon: const Icon(Icons.stay_current_landscape),
-                  color: Colors.white,
-                  onPressed: () => _setOrientation(const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]),
+                  onPressed: _toggleOrientation,
                 ),
               ],
             ),
