@@ -22,7 +22,6 @@ import 'package:aves/widgets/common/thumbnail/image.dart';
 import 'package:aves/widgets/navigation/drawer/app_drawer.dart';
 import 'package:aves/widgets/cloud/cloud_server_list_page.dart';
 import 'package:aves/widgets/cloud/cloud_video_page.dart';
-import 'package:aves/widgets/cloud/cloud_video_thumbnail.dart';
 import 'package:aves/widgets/cloud/cloud_view_options.dart';
 import 'package:aves/widgets/cloud/cloud_viewer_page.dart';
 import 'package:aves_model/aves_model.dart';
@@ -751,13 +750,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
             width: 56,
             height: 56,
             child: entry.isVideo
-                ? CloudVideoThumbnail(
-                    entry: entry,
-                    extent: 56,
-                    devicePixelRatio: dpr,
-                    cancellableNotifier: _isScrolling,
-                    progress: progress,
-                  )
+                ? _VideoTileContent(progress: progress)
                 : ThumbnailImage(
                     entry: entry,
                     extent: 56,
@@ -883,6 +876,37 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   }
 }
 
+// plain placeholder used for video entries, with an optional watch progress
+class _VideoTileContent extends StatelessWidget {
+  final double? progress;
+
+  const new({this.progress});
+
+  @override
+  Widget build(BuildContext context) {
+    final value = progress;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const ColoredBox(color: Color(0x33000000)),
+        const Center(
+          child: Icon(Icons.play_circle_outline, color: Colors.white, size: 32),
+        ),
+        if (value != null && value > 0)
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: LinearProgressIndicator(
+              value: value.clamp(0.0, 1.0),
+              minHeight: 3,
+              backgroundColor: Colors.white24,
+              valueColor: const AlwaysStoppedAnimation(Colors.redAccent),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _CloudTile extends StatelessWidget {
   final AvesEntry entry;
   final double extent;
@@ -912,13 +936,7 @@ class _CloudTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Widget content = entry.isVideo
-        ? CloudVideoThumbnail(
-            entry: entry,
-            extent: extent,
-            devicePixelRatio: devicePixelRatio,
-            cancellableNotifier: cancellableNotifier,
-            progress: progress,
-          )
+        ? _VideoTileContent(progress: progress)
         : ThumbnailImage(
             entry: entry,
             extent: extent,
