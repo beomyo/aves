@@ -85,6 +85,11 @@ android {
                 keyPassword = keystoreProperties["keyPassword"] as String
                 storeFile = file(storeFilePath)
                 storePassword = keystoreProperties["storePassword"] as String
+                // enable every scheme, otherwise the v1 (JAR) signature is
+                // omitted for minSdk >= 24 and some installers reject the APK
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
