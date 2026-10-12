@@ -18,6 +18,7 @@ Future<void> showCloudViewOptions(BuildContext context) {
 class CloudViewOptionsSheet extends StatelessWidget {
   static const List<String> layoutValues = ['mosaic', 'grid', 'list'];
   static const List<String> mediaValues = ['all', 'image', 'video'];
+  static const List<String> sortValues = ['nameAsc', 'nameDesc'];
 
   const new({super.key});
 
@@ -45,6 +46,8 @@ class CloudViewOptionsSheet extends StatelessWidget {
     _ => context.l10n.webdavMediaAll,
   };
 
+  static String sortName(BuildContext context, String sort) => sort == 'nameDesc' ? context.l10n.cloudSortNameDesc : context.l10n.cloudSortNameAsc;
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -56,6 +59,7 @@ class CloudViewOptionsSheet extends StatelessWidget {
         final media = settings.cloudMediaFilter;
         final showNames = settings.cloudShowNames;
         final immersive = settings.cloudImmersive;
+        final sort = settings.cloudSort;
 
         return SafeArea(
           top: false,
@@ -92,6 +96,14 @@ class CloudViewOptionsSheet extends StatelessWidget {
                   label: (v) => mediaName(context, v),
                   icon: mediaIcon,
                   onSelected: (v) => settings.cloudMediaFilter = v,
+                ),
+                _sectionTitle(context, l10n.cloudSort),
+                _chips<String>(
+                  values: sortValues,
+                  selected: sort,
+                  label: (v) => sortName(context, v),
+                  icon: (v) => v == 'nameDesc' ? AIcons.sortOrder : AIcons.sort,
+                  onSelected: (v) => settings.cloudSort = v,
                 ),
                 const Divider(height: 24),
                 SwitchListTile(

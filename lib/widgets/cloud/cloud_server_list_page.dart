@@ -14,11 +14,15 @@ import 'package:provider/provider.dart';
 class CloudServerListPage extends StatelessWidget {
   static const routeName = '/cloud/servers';
 
-  const new({super.key});
+  // when true, a shortcut to the last browsed folder is shown on top
+  final bool showResume;
+
+  const new({super.key, this.showResume = true});
 
   @override
   Widget build(BuildContext context) {
     final servers = context.watch<Settings>().cloudServers;
+    final resume = _resumeLocation();
     return AvesScaffold(
       appBar: AppBar(
         title: Text(context.l10n.cloudServersPageTitle),
@@ -34,20 +38,31 @@ class CloudServerListPage extends StatelessWidget {
               icon: AIcons.cloud,
               text: context.l10n.cloudEmptyServers,
             )
-          : ListView.builder(
+          : ListView(
               padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom + 80),
-              itemCount: servers.length,
-              itemBuilder: (context, index) {
-                final server = servers[index];
-                return _ServerTile(
-                  server: server,
-                  onTap: () => _browse(context, server),
-                  onEdit: () => _editServer(context, server),
-                  onRemove: () => _removeServer(context, server),
-                );
-              },
+              children: [
+                if (resume != null) _ResumeTile(server: resume.$1, url: resume.$2, onTap: () => _browse(context, resume.$1, initialUrl: resume.$2)),
+                for (final server in servers)
+                  _ServerTile(
+                    server: server,
+                    onTap: () => _browse(context, server),
+                    onEdit: () => _editServer(context, server),
+                    onRemove: () => _removeServer(context, server),
+                  ),
+              ],
             ),
     );
+  }
+
+  (CloudServer, String)? _resumeLocation() {
+    if (!showResume) return null;
+    final serverId = settings.cloudLastServerId;
+    final url = settings.cloudLastUrl;
+    if (serverId == null || url == null) return null;
+    for (final server in settings.cloudServers) {
+      if (server.id == serverId) return (server, url);
+    }
+    return null;
   }
 
   // the "+" button asks which kind of service to add
@@ -86,12 +101,12 @@ class CloudServerListPage extends StatelessWidget {
     await _editServer(context, null, type: type);
   }
 
-  void _browse(BuildContext context, CloudServer server) {
+  void _browse(BuildContext context, CloudServer server, {String? initialUrl}) {
     Navigator.push(
       context,
       MaterialPageRoute(
         settings: const RouteSettings(name: CloudBrowserPage.routeName),
-        builder: (context) => CloudBrowserPage(server: server),
+        builder: (context) => CloudBrowserPage(server: server, initialUrl: initialUrl),
       ),
     );
   }
@@ -128,6 +143,31 @@ class CloudServerListPage extends StatelessWidget {
     if (confirmed ?? false) {
       settings.removeCloudServer(server.id);
     }
+  }
+}
+
+class _ResumeTile extends StatelessWidget {
+  final CloudServer server;
+  final String url;
+  final VoidCallback onTap;
+
+  const new({required this.server, required this.url, required this.onTap});
+
+  static String _folderName(String url, CloudServer server) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return server.displayName;
+    final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+    return segments.isEmpty ? server.displayName : segments.last;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.history),
+      title: Text(_folderName(url, server)),
+      subtitle: Text(context.l10n.cloudContinueBrowsing),
+      onTap: onTap,
+    );
   }
 }
 

@@ -793,6 +793,7 @@
     "webdavActionGo": "跳转",
     "cloudTitle": "云服务",
     "cloudServersPageTitle": "云服务",
+    "cloudContinueBrowsing": "继续浏览",
     "cloudAddService": "添加服务",
     "cloudAddWebDav": "添加 WebDAV",
     "cloudAddSmb": "添加 SMB",
@@ -805,6 +806,7 @@
     "cloudTypeSmb": "SMB / Windows 共享",
     "cloudTypeWebDavHint": "WebDAV 服务器，如 AList、Nextcloud",
     "cloudTypeSmbHint": "Windows / NAS 网络共享",
+    "cloudSort": "排序",
     "cloudSortNameAsc": "名称升序（A→Z）",
     "cloudSortNameDesc": "名称降序（Z→A）"
 }

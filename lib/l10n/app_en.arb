@@ -1190,6 +1190,7 @@
   "webdavActionGo": "Go",
   "cloudTitle": "Cloud services",
   "cloudServersPageTitle": "Cloud services",
+  "cloudContinueBrowsing": "Continue browsing",
   "cloudAddService": "Add service",
   "cloudAddWebDav": "Add WebDAV",
   "cloudAddSmb": "Add SMB",
@@ -1202,6 +1203,7 @@
   "cloudTypeSmb": "SMB / Windows share",
   "cloudTypeWebDavHint": "WebDAV server, e.g. AList, Nextcloud",
   "cloudTypeSmbHint": "Windows / NAS network share",
+  "cloudSort": "Sort",
   "cloudSortNameAsc": "Name (A to Z)",
   "cloudSortNameDesc": "Name (Z to A)"
 }
