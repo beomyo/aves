@@ -228,10 +228,19 @@ class MpvVideoController(
       final platform = _mkPlayer.platform;
       if (platform is NativePlayer) {
         await platform.setProperty('cache', 'yes');
+        // `media_kit` enables the on-disk demuxer cache by default, which makes
+        // every network read hit the filesystem too; keep it in memory instead
+        await platform.setProperty('cache-on-disk', 'no');
+        // do not wait for the cache to fill before starting/resuming
         await platform.setProperty('cache-pause-initial', 'no');
-        await platform.setProperty('demuxer-readahead-secs', '3');
+        // bound how far ahead we buffer so the first frame is not delayed
+        await platform.setProperty('cache-secs', '10');
+        await platform.setProperty('demuxer-readahead-secs', '2');
         await platform.setProperty('demuxer-max-bytes', '${64 * 1024 * 1024}');
-        await platform.setProperty('network-timeout', '30');
+        // read the stream in larger chunks to cut down on round trips
+        await platform.setProperty('stream-buffer-size', '${1024 * 1024}');
+        // report network stalls sooner than mpv's default instead of blocking
+        await platform.setProperty('network-timeout', '10');
       }
     }
 
