@@ -15,6 +15,7 @@ import 'package:aves/services/media/cloud_fetch_service.dart';
 import 'package:aves/services/metadata/metadata_edit_service.dart';
 import 'package:aves/services/metadata/metadata_fetch_service.dart';
 import 'package:aves/services/security_service.dart';
+import 'package:aves/services/common/backend_video_controller_factory.dart';
 import 'package:aves/services/storage_permission_service.dart';
 import 'package:aves/services/storage_service.dart';
 import 'package:aves/services/window_service.dart';
@@ -63,7 +64,7 @@ void initPlatformServices() {
   getIt.registerLazySingleton<AvesAvailability>(LiveAvesAvailability.new);
   getIt.registerLazySingleton<LocalMediaDb>(SqfliteLocalMediaDb.new);
   getIt.registerLazySingleton<AvesAudioControllerFactory>(MpvAudioControllerFactory.new);
-  getIt.registerLazySingleton<AvesVideoControllerFactory>(MpvVideoControllerFactory.new);
+  getIt.registerLazySingleton<AvesVideoControllerFactory>(BackendVideoControllerFactory.new);
   getIt.registerLazySingleton<AvesVideoMetadataFetcher>(MpvVideoMetadataFetcher.new);
 
   getIt.registerLazySingleton<AppService>(PlatformAppService.new);

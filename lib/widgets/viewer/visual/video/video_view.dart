@@ -53,7 +53,7 @@ class _VideoViewState extends State<VideoView> {
     return StreamBuilder<PlaybackStatus>(
       stream: controller.statusStream,
       builder: (context, _) {
-        return controller.isReady ? controller.buildPlayerWidget(context) : const SizedBox();
+        return (controller.isReady || controller.needsWidgetToInitialize) ? controller.buildPlayerWidget(context) : const SizedBox();
       },
     );
   }

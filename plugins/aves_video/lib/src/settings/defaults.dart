@@ -9,6 +9,8 @@ class SettingsDefaults {
   static const videoBackgroundMode = VideoBackgroundMode.disabled;
   static const videoHardwareAcceleration = VideoHardwareAcceleration.forced;
   static const videoLoopMode = VideoLoopMode.shortOnly;
+  static const videoPlayerBackend = VideoPlayerBackend.mpv;
+  static const videoLongPressSpeed = 3.0;
   static const videoResumptionMode = VideoResumptionMode.ask;
   static const videoThumbnailMethods = <VideoThumbnailMethod>[.embedded, .preview];
 

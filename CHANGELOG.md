@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 - Tags: direct renaming of tags and tag groups
 - Map: action to copy center to clipboard from coordinate filter
 - Urdu translation (thanks Bouzid Zeroug, Feliks-WR)
+- Video: selectable playback backend (mpv / libVLC)
+- Cloud video player: long press to speed up playback, and swipe to scrub the position precisely
 
 ### Fixed
 

@@ -4,6 +4,7 @@ import 'package:aves/theme/icons.dart';
 import 'package:aves/view/view.dart';
 import 'package:aves/widgets/about/app_ref.dart';
 import 'package:aves/widgets/aves_app.dart';
+import 'package:aves/widgets/common/basic/list_tiles/slider.dart';
 import 'package:aves/widgets/common/basic/scaffold.dart';
 import 'package:aves/widgets/common/extensions/build_context.dart';
 import 'package:aves/widgets/settings/common/tiles/single_selection.dart';
@@ -19,6 +20,8 @@ class const VideoPlaybackPage({super.key}) extends StatelessWidget {
     SettingKeys.videoResumptionModeKey,
     SettingKeys.videoBackgroundModeKey,
     SettingKeys.videoHardwareAccelerationKey,
+    SettingKeys.videoPlayerBackendKey,
+    SettingKeys.videoLongPressSpeedKey,
   ];
 
   @override
@@ -74,6 +77,23 @@ class const VideoPlaybackPage({super.key}) extends StatelessWidget {
                 onPressed: () => AvesApp.launchUrl('${AppReference.avesFaq}#should-i-enable-hardware-acceleration-to-play-videos'),
                 tooltip: 'FAQ',
               ),
+            ),
+            SettingsSelectionListTile<VideoPlayerBackend>(
+              values: VideoPlayerBackend.values,
+              getName: (context, v) => v.getName(context),
+              selector: (context, s) => s.videoPlayerBackend,
+              onSelection: (v) => settings.videoPlayerBackend = v,
+              tileTitle: (_) => l10n.settingsVideoPlayerBackend,
+              dialogTitle: l10n.settingsVideoPlayerBackend,
+            ),
+            SliderListTile(
+              title: (_) => l10n.settingsVideoLongPressSpeed,
+              value: settings.videoLongPressSpeed,
+              onChanged: (v) => settings.videoLongPressSpeed = v,
+              min: 1.5,
+              max: 4,
+              divisions: 10,
+              titleTrailing: (context, v) => Text('${v.toStringAsFixed(2)}x'),
             ),
           ],
         ),

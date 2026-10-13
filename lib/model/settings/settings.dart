@@ -350,6 +350,7 @@ class Settings
               debugPrint('failed to import key=$key, value=$newValue is not an int');
             }
           case SettingKeys.subtitleFontSizeKey:
+          case SettingKeys.videoLongPressSpeedKey:
           case SettingKeys.infoMapZoomKey:
             if (newValue is double) {
               store.setDouble(key, newValue);
@@ -439,6 +440,7 @@ class Settings
           case SettingKeys.videoBackgroundModeKey:
           case SettingKeys.videoHardwareAccelerationKey:
           case SettingKeys.videoLoopModeKey:
+          case SettingKeys.videoPlayerBackendKey:
           case SettingKeys.videoResumptionModeKey:
           case SettingKeys.subtitleTextAlignmentKey:
           case SettingKeys.subtitleTextPositionKey:

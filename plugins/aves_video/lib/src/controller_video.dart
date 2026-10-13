@@ -84,6 +84,11 @@ abstract class AvesVideoController(
 
   bool get isReady;
 
+  /// Some backends (e.g. libVLC) can only start initializing once their player
+  /// widget is mounted, so the viewer must build [buildPlayerWidget] even while
+  /// [isReady] is still false.
+  bool get needsWidgetToInitialize => false;
+
   Future<void> get untilReady {
     if (isReady) return Future.value();
 

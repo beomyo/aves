@@ -46,6 +46,23 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
   Timer? _hideTimer;
   Timer? _progressTimer;
 
+  // long-press to speed up
+  double? _speedBeforeLongPress;
+
+  // swipe horizontally to scrub the position precisely
+  static const double _scrubStartThreshold = 12;
+  static const double _cancelZoneRatio = .15;
+  static const double _scrubWindowMinSecs = 15, _scrubWindowMaxSecs = 120;
+  int? _activePointer;
+  int _pointerCount = 0;
+  Offset? _scrubPointerStart;
+  bool _scrubbing = false, _scrubCancelled = false, _playingOnScrubStart = false;
+  int _scrubStartPosition = 0, _scrubTargetPosition = 0;
+  // swallows the tap that follows a scrub, so it does not toggle the controls
+  bool _suppressTap = false;
+
+  bool get _longPressing => _speedBeforeLongPress != null;
+
   String get _storageUri => widget.storageUri ?? widget.entry.uri;
 
   @override
@@ -156,8 +173,200 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
   }
 
   void _toggleControls() {
+    if (_suppressTap) {
+      _suppressTap = false;
+      return;
+    }
     setState(() => _showControls = !_showControls);
     if (_showControls) _scheduleHideControls();
+  }
+
+  // long press to speed up
+
+  void _onLongPressStart(LongPressStartDetails details) {
+    final controller = _controller;
+    if (controller == null || _zoomed) return;
+    if (!controller.isPlaying || !controller.canSetSpeedNotifier.value) return;
+    _speedBeforeLongPress = controller.speed;
+    controller.setSpeed(settings.videoLongPressSpeed);
+    if (mounted) setState(() {});
+  }
+
+  void _onLongPressEnd(LongPressEndDetails details) {
+    final previous = _speedBeforeLongPress;
+    _speedBeforeLongPress = null;
+    final controller = _controller;
+    if (controller != null && previous != null) {
+      controller.setSpeed(previous);
+    }
+    if (mounted) setState(() {});
+  }
+
+  // swipe horizontally to scrub the position precisely
+
+  // a full width swipe moves the position by a bounded window, so the position
+  // can be adjusted finely instead of jumping by tens of seconds
+  double _scrubWindowSeconds(int durationMillis) => (durationMillis / 1000 * .05).clamp(_scrubWindowMinSecs, _scrubWindowMaxSecs);
+
+  int _scrubTargetFor(Offset delta, Size size, int durationMillis, int startPosition) {
+    final deltaMillis = (delta.dx / size.width * _scrubWindowSeconds(durationMillis) * 1000).round();
+    return (startPosition + deltaMillis).clamp(0, durationMillis);
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    _suppressTap = false;
+    _pointerCount++;
+    // a second finger means a pinch, not a scrub
+    if (_pointerCount > 1) {
+      _abortScrub();
+      return;
+    }
+    if (_zoomed) return;
+    _activePointer = event.pointer;
+    _scrubPointerStart = event.position;
+    _scrubbing = false;
+    _scrubCancelled = false;
+  }
+
+  // cancels an in progress scrub without seeking
+  void _abortScrub() {
+    _activePointer = null;
+    _scrubPointerStart = null;
+    final wasScrubbing = _scrubbing;
+    _scrubbing = false;
+    _scrubCancelled = false;
+    if (wasScrubbing) {
+      _suppressTap = true;
+      final controller = _controller;
+      if (_playingOnScrubStart && controller != null) {
+        unawaited(controller.play());
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    if (event.pointer != _activePointer || _pointerCount > 1) return;
+    final start = _scrubPointerStart;
+    if (start == null) return;
+    // a long press takes precedence over scrubbing
+    if (_longPressing) return;
+
+    final controller = _controller;
+    if (controller == null || !controller.isReady) return;
+    final duration = controller.duration;
+    if (duration <= 0) return;
+
+    final size = MediaQuery.sizeOf(context);
+    final delta = event.position - start;
+
+    if (!_scrubbing) {
+      // only start scrubbing on a mostly horizontal drag
+      if (delta.dx.abs() < _scrubStartThreshold || delta.dx.abs() < delta.dy.abs()) return;
+      _scrubbing = true;
+      _playingOnScrubStart = controller.isPlaying;
+      if (_playingOnScrubStart) controller.pause();
+      _scrubStartPosition = controller.currentPosition;
+      _scrubTargetPosition = _scrubStartPosition;
+    }
+
+    _scrubTargetPosition = _scrubTargetFor(delta, size, duration, _scrubStartPosition);
+    _scrubCancelled = delta.dy.abs() > size.height * _cancelZoneRatio;
+    // preview the target on the seek bar
+    _position.value = _scrubTargetPosition;
+    setState(() {});
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    _pointerCount = (_pointerCount - 1).clamp(0, 10);
+    if (event.pointer != _activePointer) return;
+    _finishScrub();
+  }
+
+  void _onPointerCancel(PointerCancelEvent event) {
+    _pointerCount = (_pointerCount - 1).clamp(0, 10);
+    if (event.pointer != _activePointer) return;
+    _scrubCancelled = true;
+    _finishScrub();
+  }
+
+  void _finishScrub() {
+    _activePointer = null;
+    _scrubPointerStart = null;
+    final wasScrubbing = _scrubbing;
+    final cancelled = _scrubCancelled;
+    final target = _scrubTargetPosition;
+    _scrubbing = false;
+    _scrubCancelled = false;
+
+    if (wasScrubbing) {
+      // swallow the tap that follows, so it does not toggle the controls
+      _suppressTap = true;
+      final controller = _controller;
+      if (controller != null) {
+        if (!cancelled) {
+          unawaited(controller.seekTo(target));
+        }
+        if (_playingOnScrubStart) {
+          unawaited(controller.play());
+        }
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  Widget _buildScrubHud(BuildContext context, AvesVideoController controller) {
+    final duration = controller.duration;
+    final target = _scrubTargetPosition;
+    final delta = target - _scrubStartPosition;
+    final deltaText = '${delta >= 0 ? '+' : '-'}${formatFriendlyDuration(Duration(milliseconds: delta.abs()))}';
+    final color = _scrubCancelled ? Colors.redAccent : Colors.white;
+    return Align(
+      alignment: Alignment.center,
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '${formatFriendlyDuration(Duration(milliseconds: target))} / ${formatFriendlyDuration(Duration(milliseconds: duration))}',
+                style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _scrubCancelled ? context.l10n.videoScrubReleaseToCancel : deltaText,
+                style: TextStyle(color: _scrubCancelled ? Colors.redAccent : Colors.white70, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSpeedHud(BuildContext context) {
+    final speed = _controller?.speed ?? settings.videoLongPressSpeed;
+    return Align(
+      alignment: Alignment.center,
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            '${speed.toStringAsFixed(2)}x',
+            style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w500),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -173,19 +382,32 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
         children: [
           if (controller != null)
             Positioned.fill(
-              child: GestureDetector(
-                // tap toggles the controls, while two fingers pinch to zoom
-                behavior: HitTestBehavior.opaque,
-                onTap: _toggleControls,
-                child: InteractiveViewer(
-                  transformationController: _transformationController,
-                  minScale: 1,
-                  maxScale: 5,
-                  panEnabled: _zoomed,
-                  child: Center(child: VideoView(entry: widget.entry, controller: controller)),
+              // raw pointer events are used for scrubbing so the gesture does
+              // not have to win the arena against `InteractiveViewer`
+              child: Listener(
+                onPointerDown: _onPointerDown,
+                onPointerMove: _onPointerMove,
+                onPointerUp: _onPointerUp,
+                onPointerCancel: _onPointerCancel,
+                child: GestureDetector(
+                  // tap toggles the controls, long press speeds up playback,
+                  // while two fingers pinch to zoom
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _toggleControls,
+                  onLongPressStart: _onLongPressStart,
+                  onLongPressEnd: _onLongPressEnd,
+                  child: InteractiveViewer(
+                    transformationController: _transformationController,
+                    minScale: 1,
+                    maxScale: 5,
+                    panEnabled: _zoomed,
+                    child: Center(child: VideoView(entry: widget.entry, controller: controller)),
+                  ),
                 ),
               ),
             ),
+          if (controller != null && _scrubbing) _buildScrubHud(context, controller),
+          if (_longPressing && controller != null) _buildSpeedHud(context),
           if (controller != null && ready && !controller.isPlaying && _showControls)
             Center(
               child: IconButton(

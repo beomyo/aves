@@ -213,6 +213,16 @@ extension ExtraVideoLoopModeView on VideoLoopMode {
   }
 }
 
+extension ExtraVideoPlayerBackendView on VideoPlayerBackend {
+  String getName(BuildContext context) {
+    final l10n = context.l10n;
+    return switch (this) {
+      .mpv => l10n.settingsVideoPlayerBackendMpv,
+      .vlc => l10n.settingsVideoPlayerBackendVlc,
+    };
+  }
+}
+
 extension ExtraVideoResumptionModeView on VideoResumptionMode {
   String getName(BuildContext context) {
     final l10n = context.l10n;
