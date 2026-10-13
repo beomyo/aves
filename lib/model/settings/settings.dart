@@ -440,7 +440,6 @@ class Settings
           case SettingKeys.videoBackgroundModeKey:
           case SettingKeys.videoHardwareAccelerationKey:
           case SettingKeys.videoLoopModeKey:
-          case SettingKeys.videoPlayerBackendKey:
           case SettingKeys.videoResumptionModeKey:
           case SettingKeys.subtitleTextAlignmentKey:
           case SettingKeys.subtitleTextPositionKey:

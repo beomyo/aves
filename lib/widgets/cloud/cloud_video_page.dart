@@ -7,8 +7,8 @@ import 'package:aves/theme/format.dart';
 import 'package:aves/theme/icons.dart';
 import 'package:aves/widgets/common/basic/scaffold.dart';
 import 'package:aves/widgets/common/extensions/build_context.dart';
-import 'package:aves/widgets/viewer/video/db_playback_state_handler.dart';
 import 'package:aves/widgets/viewer/visual/video/video_view.dart';
+import 'package:aves_model/aves_model.dart';
 import 'package:aves_video/aves_video.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -118,7 +118,9 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
     _positionSub?.cancel();
     final controller = videoControllerFactory.buildController(
       widget.entry,
-      playbackStateHandler: DatabasePlaybackStateHandler(),
+      // cloud progress is keyed by URL and handled by this page; the controller
+      // handler is disabled because cloud entries have no stable id
+      playbackStateHandler: const _NoopPlaybackStateHandler(),
       settings: settings,
     );
     _controller = controller;
@@ -134,7 +136,8 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
     });
     // the player opens the media paused, so wait until it is ready to resume
     // where we stopped (if anywhere) and start
-    final resume = settings.cloudVideoPosition(_storageUri) ?? 0;
+    final neverResume = settings.videoResumptionMode == VideoResumptionMode.never;
+    final resume = neverResume ? 0 : (settings.cloudVideoPosition(_storageUri) ?? 0);
     controller.untilReady.then((_) async {
       if (!mounted || !identical(_controller, controller)) return;
       final duration = controller.duration;
@@ -618,4 +621,16 @@ class _SeekBarState extends State<_SeekBar> {
       },
     );
   }
+}
+
+// Cloud progress is stored by URL, so the controller must not also write to the
+// local playback database (cloud entries have no stable id).
+class _NoopPlaybackStateHandler implements PlaybackStateHandler {
+  const new();
+
+  @override
+  Future<int?> getResumeTime({required int entryId, required BuildContext context}) async => null;
+
+  @override
+  Future<void> saveResumeTime({required int entryId, required int position, required double progress}) async {}
 }

@@ -18,10 +18,6 @@ mixin VideoSettings on SettingsAccess {
 
   set videoLoopMode(VideoLoopMode newValue) => set(SettingKeys.videoLoopModeKey, newValue.name);
 
-  VideoPlayerBackend get videoPlayerBackend => getEnumOrDefault(SettingKeys.videoPlayerBackendKey, SettingsDefaults.videoPlayerBackend, VideoPlayerBackend.values);
-
-  set videoPlayerBackend(VideoPlayerBackend newValue) => set(SettingKeys.videoPlayerBackendKey, newValue.name);
-
   double get videoLongPressSpeed => getDouble(SettingKeys.videoLongPressSpeedKey) ?? SettingsDefaults.videoLongPressSpeed;
 
   set videoLongPressSpeed(double newValue) => set(SettingKeys.videoLongPressSpeedKey, newValue);

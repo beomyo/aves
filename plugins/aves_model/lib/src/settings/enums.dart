@@ -40,8 +40,6 @@ enum VideoHardwareAcceleration { disabled, enabled, forced }
 
 enum VideoLoopMode { never, shortOnly, always }
 
-enum VideoPlayerBackend { mpv, vlc }
-
 enum VideoResumptionMode { never, ask, always }
 
 enum VideoThumbnailMethod { embedded, preview, first }

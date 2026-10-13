@@ -3,8 +3,6 @@ include: package:flutter_lints/flutter.yaml
 analyzer:
   exclude:
     - lib/generated_plugin_registrant.dart
-    # vendored third-party package (patched for AGP 9), not held to our lints
-    - plugins/flutter_vlc_player/**
     - build/**
     - android/**
     - ios/**

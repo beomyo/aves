@@ -10,12 +10,17 @@ All notable changes to this project will be documented in this file.
 - Tags: direct renaming of tags and tag groups
 - Map: action to copy center to clipboard from coordinate filter
 - Urdu translation (thanks Bouzid Zeroug, Feliks-WR)
-- Video: selectable playback backend (mpv / libVLC)
 - Cloud video player: long press to speed up playback, and swipe to scrub the position precisely
+
+### Changed
+
+- Video: resume the playback position automatically instead of prompting
 
 ### Fixed
 
 - Cloud: faster startup for WebDAV/SMB video playback
+- Video: save the playback position while playing, so it survives the app being killed
+- Cloud videos: remember the position of the most recently watched videos
 
 ## <a id="v1.15.5"></a>[v1.15.5] - 2026-10-02
 

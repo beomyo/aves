@@ -25,6 +25,9 @@ abstract class AvesVideoController(
   bool _disposed = false;
 
   static const resumeTimeSaveMinDuration = Duration(minutes: 2);
+  static const playbackStateSaveInterval = Duration(seconds: 5);
+
+  Timer? _playbackStateSaveTimer;
 
   this {
     if (kFlutterMemoryAllocationsEnabled) {
@@ -35,6 +38,11 @@ abstract class AvesVideoController(
       );
     }
     entry.visualChangeNotifier.addListener(onVisualChanged);
+    // save while playing too, so the position survives a process kill
+    // (it is also saved on dispose)
+    _playbackStateSaveTimer = Timer.periodic(playbackStateSaveInterval, (_) {
+      if (isPlaying) unawaited(_savePlaybackState());
+    });
   }
 
   @override
@@ -44,6 +52,8 @@ abstract class AvesVideoController(
     if (kFlutterMemoryAllocationsEnabled) {
       LeakTracking.dispatchObjectDisposed(object: this);
     }
+    _playbackStateSaveTimer?.cancel();
+    _playbackStateSaveTimer = null;
     entry.visualChangeNotifier.removeListener(onVisualChanged);
     await _savePlaybackState();
     super.dispose();
@@ -83,11 +93,6 @@ abstract class AvesVideoController(
   Stream<double> get speedStream;
 
   bool get isReady;
-
-  /// Some backends (e.g. libVLC) can only start initializing once their player
-  /// widget is mounted, so the viewer must build [buildPlayerWidget] even while
-  /// [isReady] is still false.
-  bool get needsWidgetToInitialize => false;
 
   Future<void> get untilReady {
     if (isReady) return Future.value();

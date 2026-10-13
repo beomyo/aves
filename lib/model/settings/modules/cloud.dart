@@ -153,8 +153,10 @@ mixin CloudSettings on SettingsAccess {
       if (current != null && current.$1 == positionMillis && current.$2 == durationMillis) return;
       map[url] = (positionMillis, durationMillis);
     }
-    final entries = map.entries.take(4000).toList();
-    set(SettingKeys.cloudVideoPositionsKey, [for (final e in entries) '${e.key}\t${e.value.$1}\t${e.value.$2}']);
+    final entries = map.entries.toList();
+    // keep the most recently watched entries, not the oldest
+    final capped = entries.length > 4000 ? entries.sublist(entries.length - 4000) : entries;
+    set(SettingKeys.cloudVideoPositionsKey, [for (final e in capped) '${e.key}\t${e.value.$1}\t${e.value.$2}']);
   }
 
   // last opened location, to restore the page on the next launch

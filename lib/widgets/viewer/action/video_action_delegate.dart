@@ -221,11 +221,10 @@ class VideoActionDelegate with FeedbackMixin, PermissionAwareMixin, SizeAwareMix
       await controller.pause();
     } else {
       final resumeTimeMillis = await controller.getResumeTime(context);
-      if (resumeTimeMillis != null) {
+      if (resumeTimeMillis != null && resumeTimeMillis > 0) {
         await controller.seekTo(resumeTimeMillis);
-      } else {
-        await controller.play();
       }
+      await controller.play();
     }
   }
 }

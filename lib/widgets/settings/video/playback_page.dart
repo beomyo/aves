@@ -20,7 +20,6 @@ class const VideoPlaybackPage({super.key}) extends StatelessWidget {
     SettingKeys.videoResumptionModeKey,
     SettingKeys.videoBackgroundModeKey,
     SettingKeys.videoHardwareAccelerationKey,
-    SettingKeys.videoPlayerBackendKey,
     SettingKeys.videoLongPressSpeedKey,
   ];
 
@@ -77,14 +76,6 @@ class const VideoPlaybackPage({super.key}) extends StatelessWidget {
                 onPressed: () => AvesApp.launchUrl('${AppReference.avesFaq}#should-i-enable-hardware-acceleration-to-play-videos'),
                 tooltip: 'FAQ',
               ),
-            ),
-            SettingsSelectionListTile<VideoPlayerBackend>(
-              values: VideoPlayerBackend.values,
-              getName: (context, v) => v.getName(context),
-              selector: (context, s) => s.videoPlayerBackend,
-              onSelection: (v) => settings.videoPlayerBackend = v,
-              tileTitle: (_) => l10n.settingsVideoPlayerBackend,
-              dialogTitle: l10n.settingsVideoPlayerBackend,
             ),
             SliderListTile(
               title: (_) => l10n.settingsVideoLongPressSpeed,
