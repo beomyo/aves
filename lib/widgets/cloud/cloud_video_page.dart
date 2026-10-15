@@ -1,10 +1,15 @@
 import 'dart:async';
 
 import 'package:aves/model/entry/entry.dart';
+import 'package:aves/model/entry/origins.dart';
 import 'package:aves/model/settings/settings.dart';
+import 'package:aves/model/source/cloud/cloud_resource.dart';
+import 'package:aves/services/common/cloud_registry.dart';
 import 'package:aves/services/common/services.dart';
+import 'package:aves/services/media/cloud_mime.dart';
 import 'package:aves/theme/format.dart';
 import 'package:aves/theme/icons.dart';
+import 'package:aves/widgets/cloud/cloud_video_browser_sheet.dart';
 import 'package:aves/widgets/common/basic/scaffold.dart';
 import 'package:aves/widgets/common/extensions/build_context.dart';
 import 'package:aves/widgets/viewer/visual/video/video_view.dart';
@@ -63,11 +68,18 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
 
   bool get _longPressing => _speedBeforeLongPress != null;
 
-  String get _storageUri => widget.storageUri ?? widget.entry.uri;
+  // the playing entry and its stable URL key change while the page is open
+  // (see `_playEntry`), so they are state rather than `widget` fields
+  late AvesEntry _entry;
+  late String _storageUri;
+  // while a resume seek is in flight, do not save the (still near-start) position
+  bool _resumePending = false;
 
   @override
   void initState() {
     super.initState();
+    _entry = widget.entry;
+    _storageUri = widget.storageUri ?? widget.entry.uri;
     _transformationController.addListener(_onTransformChanged);
     _createController();
   }
@@ -96,6 +108,7 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
 
   // remember where we stopped, so the video can resume later
   void _saveProgress() {
+    if (_resumePending) return;
     final controller = _controller;
     if (controller == null) return;
     final duration = controller.duration;
@@ -117,7 +130,7 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
     _statusSub?.cancel();
     _positionSub?.cancel();
     final controller = videoControllerFactory.buildController(
-      widget.entry,
+      _entry,
       // cloud progress is keyed by URL and handled by this page; the controller
       // handler is disabled because cloud entries have no stable id
       playbackStateHandler: const _NoopPlaybackStateHandler(),
@@ -138,17 +151,105 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
     // where we stopped (if anywhere) and start
     final neverResume = settings.videoResumptionMode == VideoResumptionMode.never;
     final resume = neverResume ? 0 : (settings.cloudVideoPosition(_storageUri) ?? 0);
-    controller.untilReady.then((_) async {
+    _resumePending = resume > 0;
+    controller.untilReady.then((_) {
       if (!mounted || !identical(_controller, controller)) return;
-      final duration = controller.duration;
-      if (resume > 0 && (duration <= 0 || resume < duration - 2000)) {
-        await controller.seekTo(resume);
-      }
-      if (mounted && identical(_controller, controller)) unawaited(controller.play());
+      unawaited(_resumeAndPlay(controller, resume));
     });
     _progressTimer?.cancel();
     _progressTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
     _scheduleHideControls();
+  }
+
+  // mpv cannot seek a network stream before it knows its duration, so a seek
+  // issued right after the first frame is often silently dropped and playback
+  // starts from 0. Wait for the duration, seek, verify and retry.
+  Future<void> _resumeAndPlay(AvesVideoController controller, int resume) async {
+    if (resume > 0) {
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (controller.duration <= 0 && DateTime.now().isBefore(deadline)) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        if (!mounted || !identical(_controller, controller)) return;
+      }
+      final duration = controller.duration;
+      debugPrint('cloud video resume: requested=$resume duration=$duration');
+      if (duration <= 0 || resume < duration - 2000) {
+        for (var attempt = 0; attempt < 3; attempt++) {
+          await controller.seekTo(resume);
+          await Future.delayed(const Duration(milliseconds: 400));
+          if (!mounted || !identical(_controller, controller)) return;
+          final position = controller.currentPosition;
+          debugPrint('cloud video resume: attempt=${attempt + 1} position=$position');
+          if ((position - resume).abs() < 5000) break;
+        }
+      }
+    }
+    _resumePending = false;
+    if (mounted && identical(_controller, controller)) unawaited(controller.play());
+  }
+
+  // switch to another remote video without leaving the player
+  Future<void> _playEntry(AvesEntry entry) async {
+    final storageUri = entry.uri;
+    if (storageUri == _storageUri) return;
+
+    _saveProgress();
+    _resumePending = false;
+    _progressTimer?.cancel();
+    _hideTimer?.cancel();
+
+    settings.markCloudVisited(storageUri);
+    // the video backend streams the file itself, so hand it a URL it can
+    // consume: an authenticated URL for WebDAV, a loopback bridge for SMB
+    final playableUrl = await cloudRegistry.playbackUrl(storageUri);
+    if (!mounted) return;
+    final playableEntry = playableUrl == storageUri ? entry : entry.copyWith(uri: playableUrl);
+
+    final old = _controller;
+    setState(() {
+      _entry = playableEntry;
+      _storageUri = storageUri;
+      _showControls = true;
+      _transformationController.value = _transformationController.value.clone()..setIdentity();
+    });
+    _createController();
+    await old?.dispose();
+  }
+
+  Future<void> _showVideoBrowser() async {
+    final resource = await showModalBottomSheet<CloudResource>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) => CloudVideoBrowserSheet(playingUri: _storageUri),
+    );
+    if (resource == null || !mounted) return;
+    await _playEntry(_entryFromResource(resource));
+  }
+
+  AvesEntry _entryFromResource(CloudResource resource) {
+    final isSmb = cloudRegistry.serverForUrl(resource.url)?.isSmb ?? false;
+    return AvesEntry(
+      id: 0,
+      uri: resource.url,
+      // remote entries have no local path, which also keeps the video backend
+      // from looking for sibling subtitle files on disk
+      path: null,
+      contentId: null,
+      pageId: null,
+      sourceMimeType: cloudMimeForResource(resource),
+      width: 0,
+      height: 0,
+      sourceRotationDegrees: 0,
+      sizeBytes: resource.sizeBytes,
+      sourceTitle: resource.name,
+      dateAddedSecs: null,
+      dateModifiedMillis: resource.dateModifiedMillis,
+      sourceDateTakenMillis: null,
+      durationMillis: null,
+      trashed: false,
+      origin: isSmb ? EntryOrigins.smb : EntryOrigins.webDav,
+    );
   }
 
   Future<void> _retry() async {
@@ -404,7 +505,7 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
                     minScale: 1,
                     maxScale: 5,
                     panEnabled: _zoomed,
-                    child: Center(child: VideoView(entry: widget.entry, controller: controller)),
+                    child: Center(child: VideoView(entry: _entry, controller: controller)),
                   ),
                 ),
               ),
@@ -446,7 +547,7 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
   }
 
   Widget _buildTopBar(BuildContext context, AvesVideoController controller) {
-    final title = widget.entry.sourceTitle ?? widget.entry.bestTitle ?? '';
+    final title = _entry.sourceTitle ?? _entry.bestTitle ?? '';
     final duration = controller.duration;
     final subtitle = duration > 0 ? formatFriendlyDuration(Duration(milliseconds: duration)) : null;
     return Align(
@@ -479,6 +580,12 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
                       if (subtitle != null) Text(subtitle, style: const TextStyle(color: Colors.white70, fontSize: 12)),
                     ],
                   ),
+                ),
+                IconButton(
+                  tooltip: context.l10n.cloudVideoBrowserTitle,
+                  icon: const Icon(Icons.video_library_outlined),
+                  color: Colors.white,
+                  onPressed: _showVideoBrowser,
                 ),
                 IconButton(
                   tooltip: _landscape ? context.l10n.webdavOrientationPortrait : context.l10n.webdavOrientationLandscape,

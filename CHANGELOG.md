@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Map: action to copy center to clipboard from coordinate filter
 - Urdu translation (thanks Bouzid Zeroug, Feliks-WR)
 - Cloud video player: long press to speed up playback, and swipe to scrub the position precisely
+- Cloud video player: browse folders and play another video without leaving the player
 
 ### Changed
 
@@ -21,6 +22,8 @@ All notable changes to this project will be documented in this file.
 - Cloud: faster startup for WebDAV/SMB video playback
 - Video: save the playback position while playing, so it survives the app being killed
 - Cloud videos: remember the position of the most recently watched videos
+- Cloud videos: actually resume at the saved position (the seek used to be issued before the stream was seekable)
+- Video: pausing and resuming no longer jumps back to the last saved position
 
 ## <a id="v1.15.5"></a>[v1.15.5] - 2026-10-02
 

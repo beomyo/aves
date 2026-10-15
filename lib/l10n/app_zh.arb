@@ -809,6 +809,7 @@
     "cloudTypeWebDavHint": "WebDAV 服务器，如 AList、Nextcloud",
     "cloudTypeSmbHint": "Windows / NAS 网络共享",
     "cloudSort": "排序",
+    "cloudVideoBrowserTitle": "播放其他视频",
     "cloudLayoutCurrent": "当前文件夹布局",
     "cloudLayoutVideo": "当前视频文件夹布局",
     "cloudDefaultViews": "默认视图",

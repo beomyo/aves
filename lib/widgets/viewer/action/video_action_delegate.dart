@@ -220,9 +220,14 @@ class VideoActionDelegate with FeedbackMixin, PermissionAwareMixin, SizeAwareMix
     if (controller.isPlaying) {
       await controller.pause();
     } else {
-      final resumeTimeMillis = await controller.getResumeTime(context);
-      if (resumeTimeMillis != null && resumeTimeMillis > 0) {
-        await controller.seekTo(resumeTimeMillis);
+      // only look up a resume point when starting from the beginning: the
+      // position is saved periodically, so resuming after a simple pause would
+      // otherwise jump back to the last saved position
+      if (controller.currentPosition <= 1000) {
+        final resumeTimeMillis = await controller.getResumeTime(context);
+        if (resumeTimeMillis != null && resumeTimeMillis > 0) {
+          await controller.seekTo(resumeTimeMillis);
+        }
       }
       await controller.play();
     }

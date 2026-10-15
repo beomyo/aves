@@ -1036,6 +1036,7 @@
     "cloudTypeWebDavHint": "WebDAV 伺服器，如 AList、Nextcloud",
     "cloudTypeSmbHint": "Windows / NAS 網路共用",
     "cloudSort": "排序",
+    "cloudVideoBrowserTitle": "播放其他影片",
     "cloudLayoutCurrent": "目前資料夾版面",
     "cloudLayoutVideo": "目前影片資料夾版面",
     "cloudDefaultViews": "預設檢視",
