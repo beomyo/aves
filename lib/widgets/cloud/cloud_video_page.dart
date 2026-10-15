@@ -58,6 +58,7 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
   static const double _scrubStartThreshold = 12;
   static const double _cancelZoneRatio = .15;
   static const double _scrubWindowMinSecs = 15, _scrubWindowMaxSecs = 120;
+  static const _resumeHoldDuration = Duration(seconds: 5);
   int? _activePointer;
   int _pointerCount = 0;
   Offset? _scrubPointerStart;
@@ -162,9 +163,13 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
   }
 
   // mpv cannot seek a network stream before it knows its duration, so a seek
-  // issued right after the first frame is often silently dropped and playback
-  // starts from 0. Wait for the duration, seek, verify and retry.
+  // issued right after the first frame can be dropped and playback starts from
+  // 0. On top of that, attaching the video surface makes media_kit_video seek
+  // to the position it knows (`android_video_controller/real.dart` `widListener`),
+  // which can jump back to the start right after we resumed. So: wait for the
+  // duration, seek, then keep the position on target while the surface attaches.
   Future<void> _resumeAndPlay(AvesVideoController controller, int resume) async {
+    var watchUntil = DateTime.now();
     if (resume > 0) {
       final deadline = DateTime.now().add(const Duration(seconds: 2));
       while (controller.duration <= 0 && DateTime.now().isBefore(deadline)) {
@@ -174,18 +179,32 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
       final duration = controller.duration;
       debugPrint('cloud video resume: requested=$resume duration=$duration');
       if (duration <= 0 || resume < duration - 2000) {
-        for (var attempt = 0; attempt < 3; attempt++) {
-          await controller.seekTo(resume);
-          await Future.delayed(const Duration(milliseconds: 400));
-          if (!mounted || !identical(_controller, controller)) return;
-          final position = controller.currentPosition;
-          debugPrint('cloud video resume: attempt=${attempt + 1} position=$position');
-          if ((position - resume).abs() < 5000) break;
-        }
+        await controller.seekTo(resume);
+        watchUntil = DateTime.now().add(_resumeHoldDuration);
       }
     }
-    _resumePending = false;
     if (mounted && identical(_controller, controller)) unawaited(controller.play());
+
+    var reseeks = 0;
+    while (DateTime.now().isBefore(watchUntil)) {
+      await Future.delayed(const Duration(milliseconds: 250));
+      if (!mounted || !identical(_controller, controller)) return;
+      // let the user take over (scrub, seek bar)
+      if (_scrubbing || _activePointer != null) break;
+      final position = controller.currentPosition;
+      // the surface attach resets playback to the very start; only counteract that
+      if (resume > 10000 && position < 5000) {
+        debugPrint('cloud video resume: position dropped to $position, re-seeking $resume');
+        reseeks++;
+        await controller.seekTo(resume);
+      }
+    }
+    // saving stays suppressed until here, so a reset position cannot overwrite
+    // the stored one
+    _resumePending = false;
+    if (reseeks > 0) {
+      debugPrint('cloud video resume: re-seeks=$reseeks final=${controller.currentPosition}');
+    }
   }
 
   // switch to another remote video without leaving the player

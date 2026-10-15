@@ -22,7 +22,7 @@ All notable changes to this project will be documented in this file.
 - Cloud: faster startup for WebDAV/SMB video playback
 - Video: save the playback position while playing, so it survives the app being killed
 - Cloud videos: remember the position of the most recently watched videos
-- Cloud videos: actually resume at the saved position (the seek used to be issued before the stream was seekable)
+- Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
 ## <a id="v1.15.5"></a>[v1.15.5] - 2026-10-02
