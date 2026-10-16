@@ -111,6 +111,8 @@ Always pipe push output through the `sed` redaction above. `gh` is not installed
 
 **Security:** the user's PAT has historically had near-full scopes (`admin:org`, `delete_repo`, `workflow`, `repo`) and has been pasted in chat. Do not echo it, do not persist it, and remind the user to rotate it to a `contents:write`-only fine-grained token.
 
+**Local token store:** the PAT is kept in a gitignored `.env` at the repo root as `GH_TOKEN=...` (mode 600). Read it from there for pushes instead of asking the user to paste it again — never write the token value into any tracked file (this file, `.git/config`, source). Export it as `$GH_TOKEN` for the push recipe above.
+
 ## Version bump
 
 Bump `version:` in **all four** files together (they must stay in sync): `pubspec.yaml`, `flavors/pubspec_play.yaml`, `flavors/pubspec_izzy.yaml`, `flavors/pubspec_libre.yaml`. Also add a `CHANGELOG.md` entry.
