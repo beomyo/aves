@@ -46,17 +46,23 @@ mkdir -p build/media_kit_libs_android_video/v1.1.7 && cp /tmp/mk_jars/*.jar buil
 
 Build **from the ROOT `pubspec.yaml`**. Do **not** run `scripts/apply_flavor_*.sh` first: `flavors/pubspec_*.yaml` (and their `.lock` files) are stale — they lack `smb_connect`, so applying them breaks the build. Root `pubspec.lock` is the good one and is what actually gets used.
 
+**Only arm64-v8a is built and released** (decided 2026-10-16). Do not build armeabi-v7a or x86_64.
+
 ```bash
-# release, per-ABI (the shipping build)
-flutter build apk --release --flavor play -t lib/main_play.dart --split-per-abi
-# -> build/app/outputs/flutter-apk/app-<abi>-play-release.apk  (abi = arm64-v8a, armeabi-v7a, x86_64)
+# release (the shipping build) - one arm64-v8a APK
+flutter build apk --release --flavor play -t lib/main_play.dart --split-per-abi --target-platform android-arm64
+# -> build/app/outputs/flutter-apk/app-arm64-v8a-play-release.apk  (~26 MB, versionCode N*100+2)
 
 # quick smoke build while iterating (no R8, faster)
 flutter build apk --debug --flavor play -t lib/main_play.dart
 ```
 
-- `android/app/build.gradle.kts`: `isMinifyEnabled=true`, `isShrinkResources=true`, R8 full mode, `useLegacyPackaging=true` (compressed native libs), ABI filter {armeabi-v7a, arm64-v8a, x86_64}, versionCode = base*100 + abiCode.
-- Per-ABI release APKs are ~26 MB. Adding a large native dependency is expensive (libvlc added ~20 MB/ABI) — validate the size delta when adding native deps.
+Both flags are required, for two different reasons:
+- **`--target-platform android-arm64` alone does NOT filter the ABIs.** `android/app/build.gradle.kts` applies `ndk { abiFilters += [armeabi-v7a, arm64-v8a, x86_64] }` in the release build type, which re-adds every ABI and yields a single ~39 MB all-ABI APK. `--split-per-abi` sets `useNdkAbiFilters=false`, disabling that filter, and Flutter then emits only the split for the target platform.
+- **`--split-per-abi` also sets the versionCode.** The split build overrides it to `versionCode * 100 + abiCode` (arm64 → `+2`), e.g. `19302`. A non-split build keeps the bare `versionCode` (e.g. `193`), which is *lower* than what is already installed — Android will reject the install ("App not installed"). So do not drop `--split-per-abi`.
+
+- `android/app/build.gradle.kts`: `isMinifyEnabled=true`, `isShrinkResources=true`, R8 full mode, `useLegacyPackaging=true` (compressed native libs), ABI filter {armeabi-v7a, arm64-v8a, x86_64} (release type only), versionCode = base*100 + abiCode.
+- The arm64 release APK is ~26 MB. Adding a large native dependency is expensive (libvlc added ~20 MB/ABI) — validate the size delta when adding native deps.
 - l10n is generated into `lib/l10ngen/` (gitignored). `flutter pub get` regenerates it. "untranslated message" warnings during pub get are normal.
 - Localization source files: `lib/l10n/app_*.arb` (en is the template). Add new strings to `app_en.arb` + `app_zh.arb` + `app_zh_Hant.arb` at minimum.
 
@@ -65,7 +71,7 @@ flutter build apk --debug --flavor play -t lib/main_play.dart
 ```bash
 BT=/opt/android-sdk/build-tools/37.0.0
 "$BT/apksigner" verify --verbose app-arm64-v8a-play-release.apk   # expect v2+v3, v1 false is OK (minSdk 24)
-"$BT/aapt" dump badging app-arm64-v8a-play-release.apk | grep -E '^package:|native-code'
+"$BT/aapt" dump badging app-arm64-v8a-play-release.apk | grep -E '^package:|native-code'   # native-code must be arm64-v8a only; versionCode = N*100+2
 ```
 Never give the user an APK from `build/app/outputs/` without running `apksigner verify` on it.
 
@@ -116,15 +122,25 @@ Bump `version:` in **all four** files together (they must stay in sync): `pubspe
 Convention:
 - tag `v<version>-cloud`, created at the pushed commit (`target_commitish` = HEAD SHA)
 - release name `Aves <version> + WebDAV & SMB browsing` (or a short feature description)
-- assets renamed `aves-<version>-cloud-<abi>.apk` for abi in {arm64-v8a, armeabi-v7a, x86_64}
-- body: "Fixed/Added in this version" + Notes (test key / Android 7.0+ / AList `/dav` hint) + Assets list
+- **single asset** `aves-<version>-cloud-arm64-v8a.apk` (arm64-v8a is the only built ABI)
+- body: "Fixed/Added in this version" + Notes (test key / Android 7.0+ / AList `/dav` hint) + the asset
 
 Steps (Python + `urllib` with the proxy; `gh` is unavailable):
 1. `git rev-parse HEAD` → SHA.
 2. `POST https://api.github.com/repos/beomyo/aves/releases` with `Authorization: Bearer <token>`, `tag_name`, `target_commitish`, `name`, `body`, `draft:false`.
-3. For each APK: `POST https://uploads.github.com/repos/beomyo/aves/releases/<id>/assets?name=<file>` with `Content-Type: application/octet-stream` and the raw bytes (timeout 600s; uploads are ~26 MB each).
-4. Verify with `GET .../releases/tags/<tag>` and print the asset names/sizes.
+3. Upload the APK: `POST https://uploads.github.com/repos/beomyo/aves/releases/<id>/assets?name=<file>` with `Content-Type: application/octet-stream` and the raw bytes (timeout 600s).
+4. Verify with `GET .../releases/tags/<tag>` and print the asset name/size.
 5. Remove the token temp file.
+
+## Removed cruft (2026-10-16)
+
+The fork does not publish to the Play Store, so store/upstream-only material was deleted: `fastlane/` (494 store metadata/screenshot files), `whatsnew/`, `test_driver/`, `plugins/aves_video_exo/` (disabled `video_player` stub — also removed from the `workspace:` list in all four pubspecs), `.vscode/`, `devtools_options.yaml`, `.pre-commit-config.yaml`.
+
+Left in place but effectively dead for this fork (upstream-only release/CI tooling) — safe to ignore or remove later:
+- `scripts/gen_changelogs.sh` reads `whatsnew/` and writes `fastlane/…` (both now gone)
+- `scripts/screenshot_post_process.sh` consumes `test_driver/` output
+- `scripts/{gen,apply}_flavor_*.sh`, `scripts/extract_apks_*.sh` (hard-coded upstream paths), `scripts/gen_flavors.sh`, `scripts/apply_version_bump.sh`
+- `.github/workflows/release.yml` and `quality-check.yml` are upstream workflows that invoke `./flutterw` (broken here) and need secrets that the fork does not have.
 
 ## Known upstream gotchas
 

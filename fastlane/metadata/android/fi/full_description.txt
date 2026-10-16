@@ -1,5 +1,0 @@
-<i>Aves</i> pystyy käsittelemään kaikenlaisia kuvia ja videoita, mukaan lukien tyypillisiä JPEG- ja MP4-tiedostoja, mutta myös eksoottisempia asioita, kuten <b>monisivuisia TIFF-, SVG- ja vanhoja AVI-tiedostoja</b>! Se skannaa mediakokoelmasi tunnistaakseen <b>liikevalokuvia</b>, <b>panoraamakuvia</b> (eli valokuvasfäärejä), <b>360°-videoita</b> sekä <b>GeoTIFF</b>-tiedostoja.
-
-<b>Navigointi ja haku</b> ovat tärkeä osa <i>Aves</i>ia. Tavoitteena on, että käyttäjät voivat helposti siirtyä albumeista valokuviin, tunnisteisiin, karttoihin jne.
-
-<i>Aves</i> integroituu Androidiin (mukaan lukien Android TV) ja sisältää ominaisuuksia, kuten <b>widgetit</b>, <b>sovellusten pikakuvakkeet</b>, <b>näytönsäästäjä</b> ja <b>järjestelmänlaajuisen haun</b> käsittelyn. Se toimii myös <b>median katseluohjelmana sekä valitsijana.</b>.

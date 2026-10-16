@@ -1,5 +1,0 @@
-<i>Aves</i> có thể xử lý tất cả các loại hình ảnh và video, bao gồm cả JPEG và MP4 thông thường của bạn, cũng như những thứ kỳ lạ hơn như <b>TIFF nhiều trang, SVG, AVI cũ và hơn thế nữa</b>! Nó quét bộ sưu tập phương tiện của bạn để xác định <b>ảnh chuyển động</b>, <b>ảnh toàn cảnh</b> (còn gọi là ảnh toàn cảnh 360 độ), <b>video 360 độ</b> cũng như các tập tin <b>GeoTIFF</b>.
-
-<b>Điều hướng và tìm kiếm</b> là một phần quan trọng của <i>Aves</i>. Mục tiêu là để người dùng dễ dàng chuyển từ album sang ảnh sang thẻ sang bản đồ, v.v.
-
-<i>Aves</i> tương thích với Android (bao gồm cả Android TV) với các tính năng như <b>widget</b>, <b>phím tắt ứng dụng</b>, <b>trình bảo vệ màn hình</b> và xử lý <b>tìm kiếm toàn hệ thống</b>. Nó cũng hoạt động như một <b>trình xem và lựa chọn phương tiện</b>.

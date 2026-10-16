@@ -1,5 +1,0 @@
-<i>Aves</i> pot gestionar tot tipus d'imatges i vídeos, inclosos els típics JPEG i MP4, però també coses més exòtiques com <b>multi-pàgina TIFFs, SVG, AVI antics i més</b>! Escaneja la col·lecció multimèdia per identificar <b>fotos en moviment</b>, <b>panoràmiques</b>(àlies esferes de fotos), <b>vídeos 360.</b>, així com fitxers <b>GeoTIFF</b>.
-
-<b>Navegació i cerca</b> és una part important de <i>Aves</i>. L'objectiu és que els usuaris puguin fluir fàcilment d'àlbums a fotos, etiquetes a mapes, etc.
-
-<i>Aves</i> s'integra amb Android (incloent Android TV) amb funcions com <b>ginys</b>, <b>dreceres d'aplicació</b>, <b>estalvi de pantalla</b>i gestió de<b> la cerca global</b>. També funciona com a <b>visor i selector multimèdia</b>.

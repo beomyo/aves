@@ -1,5 +1,0 @@
-<i>Aves</i> getur meðhöndlað allar algengar gerðir mynda og myndskeiða, þar með talið JPEG og MP4, en einnig sjaldgæfari skrár á borð við <b>marg-síðna TIFF-myndir, SVG-línuteikningar, eldri gerðir AVI-skráa og margt fleira</b>! Forritið skannar safnið þitt til að greina <b>hreyfiljósmyndir</b>, <b>víðmyndir</b> (t.d. myndahnetti), <b>360° myndskeið</b>, auk <b>GeoTIFF-skráa</b>.
-
-<b>Flakk og leit</b> eru mikilvægir hlutar <i>Aves</i>. Markmiðið er að notendur eigi auðvelt með að flæða úr albúmum yfir í ljósmyndir yfir í merki eða landakort, o.s.frv.
-
-<i>Aves</i> samtvinnast við Android (að meðtöldu Android TV) með eiginleikum á borð við <b>viðmótshluta</b>, <b>flýtileiðir í forrit</b>, <b>skjáhvílu</b> og <b>víðværa leit</b>. Það virkar einnig sem <b>margmiðlunarskoðari og veljari</b>.

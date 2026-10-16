@@ -1,5 +1,0 @@
-<i>Aves</i> dapat menangani semua jenis gambar dan video, termasuk JPEG dan MP4, tetapi juga hal-hal yang lebih eksotis seperti <b>TIFF halaman-multi, SVG, AVI lama, dan lainnya</b>! Ini memindai koleksi media Anda untuk mengidentifikasi <b>foto bergerak</b>, <b>panorama</b> (foto 360), <b>video 360°</b>, dan file <b>GeoTIFF</b>.
-
-<b>Navigasi dan pencarian</b> merupakan bagian penting dari <i>Aves</i>. Tujuannya adalah agar pengguna dengan mudah mengalir dari album ke foto ke tag ke peta, dll.
-
-<i>Aves</i> mengintegrasi dengan Android dengan fitur-fitur seperti <b>pintasan aplikasi</b>, <b>jalan pintas aplikasi</b>, <b>screen saver</b> dan <b>pencarian global</b> penanganan. Ini juga berfungsi sebagai <b>penampil dan pemilih media</b>.

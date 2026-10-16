@@ -1,5 +1,0 @@
-<i>Aves</i> kan handsama alle slags bileter og videoar, medteken JPEG og MP4, men au meir uvane ting som <b>fleirsida TIFF-ar, SVG-ar, gamle AVI-ar med meir</b>! Aves ser igjennom mediasamlinga di for å gjenkjenne <b>rørslebilete</b>, <b>panorama</b> (bilete med vidt oversyn), <b>360° videoar</b>, og au <b>GeoTIFF</b>-filer.
-
-<b>Navigering og søk</b> har mykje å sei i <i>Aves</i>. Målet er at ein skal lett kunne gå ifrå album, til bilete, til merkelappar, til kart, osv.
-
-<i>Aves</i> integrates with Android (including Android TV) with features such as <b>widgets</b>, <b>app shortcuts</b>, <b>screen saver</b> and <b>global search</b> handling. It also works as a <b>media viewer and picker</b>.

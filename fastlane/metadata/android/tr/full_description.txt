@@ -1,5 +1,0 @@
-<i>Aves</i> tipik JPEG ve MP4'lerin yanı sıra <b>çok sayfalı TIFF'ler, SVG'ler, eski AVI'ler ve daha fazlası</b> gibi daha egzotik şeyler de dahil olmak üzere her türlü görüntü ve videoyu işleyebilir! <b>Hareketli fotoğrafları</b>, <b>panoramaları</b> (fotoğraf küreleri olarak da bilinir), <b>360° videoları</b> ve <b>GeoTIFF</b> dosyalarını tanımlamak için medya koleksiyonunuzu tarar.
-
-<b>Gezinme ve arama</b> <i>Aves'in</i> önemli bir parçasıdır. Amaç, kullanıcıların albümlerden fotoğraflara, etiketlerden haritalara vb. kolayca geçmesini sağlamaktır.
-
-<i>Aves</i>, Android (Android TV dahil) <b>araçlar</b>ı, <b>uygulama kısayolları</b>, <b>ekran koruyucu</b> ve <b>genel arama</b> işlemi gibi özelliklerle birlikte çalışır. Ayrıca <b>medya görüntüleyici ve seçici</b> olarak da çalışır.

@@ -31,7 +31,6 @@ workspace:
   - plugins/aves_ui
   - plugins/aves_utils
   - plugins/aves_video
-  - plugins/aves_video_exo
   - plugins/aves_video_mpv
 
 # use `scripts/apply_flavor_{flavor}.sh` to set the right dependencies for the flavor
@@ -58,8 +57,6 @@ dependencies:
     path: plugins/aves_services_google
   aves_video:
     path: plugins/aves_video
-  #  aves_video_exo:
-  #    path: plugins/aves_video_exo
 
   aves_video_mpv:
     path: plugins/aves_video_mpv
