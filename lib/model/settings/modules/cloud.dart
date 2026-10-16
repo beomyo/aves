@@ -114,6 +114,18 @@ mixin CloudSettings on SettingsAccess {
 
   set cloudVideoThumbnails(bool newValue) => set(SettingKeys.cloudVideoThumbnailsKey, newValue);
 
+  // percentage of the video duration used as the thumbnail timestamp: starting
+  // slightly after the beginning skips the black frame many videos open with
+  double get cloudVideoThumbnailPercent =>
+      (getDouble(SettingKeys.cloudVideoThumbnailPercentKey) ?? defaultVideoThumbnailPercent).clamp(minVideoThumbnailPercent, maxVideoThumbnailPercent);
+
+  set cloudVideoThumbnailPercent(double newValue) =>
+      set(SettingKeys.cloudVideoThumbnailPercentKey, newValue.clamp(minVideoThumbnailPercent, maxVideoThumbnailPercent));
+
+  static const double defaultVideoThumbnailPercent = 1;
+  static const double minVideoThumbnailPercent = .5;
+  static const double maxVideoThumbnailPercent = 20;
+
   bool get cloudVideoDurationVisible => getBool(SettingKeys.cloudVideoDurationKey) ?? true;
 
   set cloudVideoDurationVisible(bool newValue) => set(SettingKeys.cloudVideoDurationKey, newValue);

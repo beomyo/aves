@@ -151,6 +151,13 @@ class CloudImageLoader {
 
 final cloudImageLoader = CloudImageLoader();
 
+// drops the cached payload of a cloud entry (the extracted video frame and any
+// downloaded image bytes), so the next request fetches it again
+Future<void> evictCloudThumbnail(String uri) async {
+  await cloudDiskCache.remove('${CloudAwareMediaFetchService._videoThumbnailCachePrefix}$uri');
+  await cloudDiskCache.remove(uri);
+}
+
 // Decorates the platform media fetch service so that remote URIs
 // (WebDAV / SMB entries) are served from the network while every other URI
 // keeps using the platform implementation unchanged.
@@ -236,6 +243,7 @@ class CloudAwareMediaFetchService implements MediaFetchService {
     required ThumbnailProviderKey request,
     String? uriOverride,
     Map<String, String>? httpHeaders,
+    double? previewFraction,
     Object? taskKey,
     int? priority,
   }) {
@@ -244,6 +252,7 @@ class CloudAwareMediaFetchService implements MediaFetchService {
       request: request,
       uriOverride: uriOverride,
       httpHeaders: httpHeaders,
+      previewFraction: previewFraction,
       taskKey: taskKey,
       priority: priority,
     );
@@ -285,12 +294,14 @@ class CloudAwareMediaFetchService implements MediaFetchService {
     try {
       final source = await cloudRegistry.playbackSource(uri);
       final headers = source.headers.isEmpty ? null : source.headers;
+      final previewFraction = settings.cloudVideoThumbnailPercent / 100;
       final bytes = await _delegate
           .getThumbnailBytes(
             decoded: decoded,
             request: request,
             uriOverride: source.url,
             httpHeaders: headers,
+            previewFraction: previewFraction,
             taskKey: taskKey,
             priority: priority ?? ServiceCallPriority.getVideoThumbnail,
           )
@@ -311,6 +322,7 @@ class CloudAwareMediaFetchService implements MediaFetchService {
             targetExtentDip: request.extent,
             methods: request.videoThumbnailMethods ?? [],
             httpHeaders: headers,
+            previewFraction: settings.cloudVideoThumbnailPercent / 100,
           )
           .timeout(_videoThumbnailTimeout);
       final codec = await descriptor?.instantiateCodec(

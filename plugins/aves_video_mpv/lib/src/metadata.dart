@@ -356,13 +356,14 @@ class MpvVideoMetadataFetcher extends AvesVideoMetadataFetcher {
     required double targetExtentDip,
     required List<VideoThumbnailMethod> methods,
     Map<String, String>? httpHeaders,
+    double? previewFraction,
   }) async {
     if (targetExtentDip == 0) return null;
 
     final player = await _openBackgroundPlayer(uri: uri, mimeType: mimeType, httpHeaders: httpHeaders);
     if (player == null) return null;
 
-    final bgra = await _getPreferredThumbnail(player, methods);
+    final bgra = await _getPreferredThumbnail(player, methods, previewFraction ?? AvesVideoMetadataFetcher.defaultPreviewTimeFraction);
     final videoParams = player.state.videoParams;
     await player.dispose();
 
@@ -395,7 +396,7 @@ class MpvVideoMetadataFetcher extends AvesVideoMetadataFetcher {
   }
 
   // return bytes in BGRA
-  Future<Uint8List?> _getPreferredThumbnail(Player player, List<VideoThumbnailMethod> methods) async {
+  Future<Uint8List?> _getPreferredThumbnail(Player player, List<VideoThumbnailMethod> methods, double previewFraction) async {
     for (final method in methods) {
       Uint8List? bytes;
       switch (method) {
@@ -403,7 +404,7 @@ class MpvVideoMetadataFetcher extends AvesVideoMetadataFetcher {
           // skip
           bytes = null;
         case VideoThumbnailMethod.preview:
-          bytes = await _getFrameAtTime(player, getPreviewThumbnailTime(player.state.duration));
+          bytes = await _getFrameAtTime(player, getPreviewThumbnailTime(player.state.duration, fraction: previewFraction));
         case VideoThumbnailMethod.first:
           bytes = await _getFrameAtTime(player, Duration.zero);
       }

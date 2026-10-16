@@ -25,6 +25,18 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.5"></a>[v1.19.5] - 2026-10-16
+
+### Added
+
+- Cloud: a setting for the position of the extracted video frame (0.5% to 20% of the duration)
+- Cloud: action to rebuild the thumbnails of the current folder
+
+### Changed
+
+- Cloud: the frame position never falls below 3 seconds (or half of a shorter video), so short videos no longer get a black thumbnail
+- Cloud: the view options sheet takes at most half of the screen
+
 ## <a id="v1.19.4"></a>[v1.19.4] - 2026-10-16
 
 ### Added

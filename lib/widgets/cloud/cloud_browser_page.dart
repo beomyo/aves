@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:aves/model/entry/cache.dart';
 import 'package:aves/model/entry/entry.dart';
 import 'package:aves/model/entry/extensions/props.dart';
 import 'package:aves/model/entry/origins.dart';
@@ -345,6 +346,19 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     _scheduleAspectFlush();
   }
 
+  // drops the cached thumbnails of the entries of the current folder (the
+  // persisted payloads and the in-memory image keys), so they are fetched again
+  Future<void> _rebuildThumbnails() async {
+    final entries = _media.value;
+    for (final entry in entries) {
+      await evictCloudThumbnail(entry.uri);
+      EntryCache.evict(entry.uri);
+    }
+    // aspect ratios were derived from the discarded images
+    _aspects.clear();
+    if (mounted) setState(() {});
+  }
+
   double _aspectOf(AvesEntry entry) => (entry.isVideo ? (_aspects[entry.uri] ?? 16 / 9) : (_aspects[entry.uri] ?? 1.0)).clamp(0.35, 2.6);
 
   void _onScaleStart(ScaleStartDetails details) {
@@ -617,7 +631,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
         IconButton(
           tooltip: context.l10n.webdavViewOptions,
           icon: const Icon(AIcons.layout),
-          onPressed: () => showCloudViewOptions(context, url: _currentUrl, video: videoMode),
+          onPressed: () => showCloudViewOptions(context, url: _currentUrl, video: videoMode, onRebuildThumbnails: _rebuildThumbnails),
         ),
       ],
       bottom: PreferredSize(

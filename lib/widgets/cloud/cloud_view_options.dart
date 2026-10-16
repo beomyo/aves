@@ -1,14 +1,22 @@
+import 'package:aves/model/settings/modules/cloud.dart';
 import 'package:aves/model/settings/settings.dart';
 import 'package:aves/theme/icons.dart';
 import 'package:aves/widgets/common/extensions/build_context.dart';
 import 'package:material_ui/material_ui.dart';
 
-Future<void> showCloudViewOptions(BuildContext context, {required String url, required bool video}) {
+Future<void> showCloudViewOptions(
+  BuildContext context, {
+  required String url,
+  required bool video,
+  Future<void> Function()? onRebuildThumbnails,
+}) {
   return showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
-    builder: (context) => CloudViewOptionsSheet(url: url, video: video),
+    // never take more than half of the screen, the content scrolls instead
+    constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height / 2),
+    builder: (context) => CloudViewOptionsSheet(url: url, video: video, onRebuildThumbnails: onRebuildThumbnails),
   );
 }
 
@@ -22,8 +30,9 @@ class CloudViewOptionsSheet extends StatelessWidget {
 
   final String url;
   final bool video;
+  final Future<void> Function()? onRebuildThumbnails;
 
-  const new({super.key, required this.url, required this.video});
+  const new({super.key, required this.url, required this.video, this.onRebuildThumbnails});
 
   static IconData layoutIcon(String layout) => switch (layout) {
     'mosaic' => AIcons.layoutMosaic,
@@ -67,6 +76,7 @@ class CloudViewOptionsSheet extends StatelessWidget {
         final showNames = settings.cloudShowNames;
         final showSizes = settings.cloudShowSizes;
         final videoThumbnails = settings.cloudVideoThumbnails;
+        final videoThumbnailPercent = settings.cloudVideoThumbnailPercent;
         final videoDuration = settings.cloudVideoDurationVisible;
         final videoPlayIcon = settings.cloudVideoPlayIcon;
         final viewerThumbnails = settings.cloudViewerThumbnails;
@@ -154,6 +164,30 @@ class CloudViewOptionsSheet extends StatelessWidget {
                   value: videoPlayIcon,
                   onChanged: (v) => settings.cloudVideoPlayIcon = v,
                 ),
+                if (videoThumbnails) ...[
+                  _sectionTitle(context, '${l10n.cloudVideoThumbnailPosition}  ${videoThumbnailPercent.toStringAsFixed(1)}%'),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Slider(
+                      value: videoThumbnailPercent.clamp(CloudSettings.minVideoThumbnailPercent, CloudSettings.maxVideoThumbnailPercent),
+                      min: CloudSettings.minVideoThumbnailPercent,
+                      max: CloudSettings.maxVideoThumbnailPercent,
+                      divisions: ((CloudSettings.maxVideoThumbnailPercent - CloudSettings.minVideoThumbnailPercent) / .5).round(),
+                      label: '${videoThumbnailPercent.toStringAsFixed(1)}%',
+                      onChanged: (v) => settings.cloudVideoThumbnailPercent = v,
+                    ),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.refresh),
+                    title: Text(l10n.cloudRebuildThumbnails),
+                    onTap: onRebuildThumbnails == null
+                        ? null
+                        : () {
+                            Navigator.pop(context);
+                            onRebuildThumbnails!();
+                          },
+                  ),
+                ],
                 const Divider(height: 24),
                 SwitchListTile(
                   title: Text(l10n.cloudViewerThumbnails),

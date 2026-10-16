@@ -1218,6 +1218,8 @@
   "cloudShowVideoThumbnails": "Video thumbnails",
   "cloudShowVideoDuration": "Show video duration",
   "cloudShowVideoPlayIcon": "Show play icon",
+  "cloudVideoThumbnailPosition": "Frame position",
+  "cloudRebuildThumbnails": "Rebuild thumbnails",
   "cloudSortNameAsc": "Name (A to Z)",
   "cloudSortNameDesc": "Name (Z to A)"
 }

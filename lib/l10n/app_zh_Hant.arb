@@ -1048,6 +1048,8 @@
     "cloudShowVideoThumbnails": "影片縮圖",
     "cloudShowVideoDuration": "顯示影片長度",
     "cloudShowVideoPlayIcon": "顯示播放圖示",
+    "cloudVideoThumbnailPosition": "取幀位置",
+    "cloudRebuildThumbnails": "重建縮圖",
     "cloudSortNameAsc": "名稱升冪（A→Z）",
     "cloudSortNameDesc": "名稱降冪（Z→A）"
 }

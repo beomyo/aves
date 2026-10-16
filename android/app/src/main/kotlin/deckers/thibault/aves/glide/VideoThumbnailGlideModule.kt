@@ -35,6 +35,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.io.ByteArrayInputStream
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 @GlideModule
@@ -44,7 +46,13 @@ class VideoThumbnailGlideModule : LibraryGlideModule() {
     }
 }
 
-class VideoThumbnail(val context: Context, val uri: Uri, val methods: List<VideoThumbnailMethod>, val httpHeaders: Map<String, String>? = null)
+class VideoThumbnail(
+    val context: Context,
+    val uri: Uri,
+    val methods: List<VideoThumbnailMethod>,
+    val httpHeaders: Map<String, String>? = null,
+    val previewFraction: Double? = null,
+)
 
 internal class VideoThumbnailLoader : ModelLoader<VideoThumbnail, Bitmap> {
     override fun buildLoadData(model: VideoThumbnail, width: Int, height: Int, options: Options): ModelLoader.LoadData<Bitmap> {
@@ -96,7 +104,7 @@ internal class VideoThumbnailFetcher(private val model: VideoThumbnail, val widt
         for (method in methods) {
             val bitmap: Bitmap? = when (method) {
                 VideoThumbnailMethod.EMBEDDED -> getEmbeddedPicture(retriever)
-                VideoThumbnailMethod.PREVIEW -> getFrame(retriever, timeMicros = getPreviewTimeMicrosFromRetriever(retriever))
+                VideoThumbnailMethod.PREVIEW -> getFrame(retriever, timeMicros = getPreviewTimeMicrosFromRetriever(retriever, model.previewFraction))
                 VideoThumbnailMethod.FIRST -> getFrame(retriever, timeMicros = TIME_FRAME_FIRST)
             }
             if (bitmap != null) return bitmap
@@ -175,10 +183,10 @@ internal class VideoThumbnailFetcher(private val model: VideoThumbnail, val widt
         return Size(dstWidth, dstHeight)
     }
 
-    private fun getPreviewTimeMicrosFromRetriever(retriever: MediaMetadataRetriever): Long {
+    private fun getPreviewTimeMicrosFromRetriever(retriever: MediaMetadataRetriever, fraction: Double?): Long {
         var durationMillis: Long? = null
         retriever.getSafeLong(MediaMetadataRetriever.METADATA_KEY_DURATION) { durationMillis = it }
-        return getPreviewTimeMicrosFromDuration(durationMillis)
+        return getPreviewTimeMicrosFromDuration(durationMillis, fraction)
     }
 
     // there is no consistent strategy across devices to match
@@ -186,14 +194,17 @@ internal class VideoThumbnailFetcher(private val model: VideoThumbnail, val widt
     // so we derive one in an arbitrary way
     //
     // use same strategy on flutter and platform sides
-    private fun getPreviewTimeMicrosFromDuration(durationMillis: Long?): Long {
+    private fun getPreviewTimeMicrosFromDuration(durationMillis: Long?, fraction: Double?): Long {
         if (durationMillis == null || durationMillis <= 0) {
             return TIME_FRAME_FIRST
         }
 
         // start slightly after the beginning, as many videos open with a black
-        // or logo frame
-        val timeMillis = (durationMillis * PREVIEW_TIME_FRACTION).toLong()
+        // or logo frame; `fraction` alone is too early on short videos, so never
+        // pick a frame before the floor, unless that would land past half of a
+        // very short video
+        val floorMillis = min(PREVIEW_TIME_FLOOR_MILLIS, (durationMillis * PREVIEW_TIME_FLOOR_MAX_FRACTION).toLong())
+        val timeMillis = max((durationMillis * (fraction ?: DEFAULT_PREVIEW_TIME_FRACTION)).toLong(), floorMillis).coerceAtMost(durationMillis)
         return timeMillis * 1000
     }
 
@@ -256,7 +267,11 @@ internal class VideoThumbnailFetcher(private val model: VideoThumbnail, val widt
         private val LOG_TAG = LogUtils.createTag<VideoThumbnailFetcher>()
         private val DEFAULT_METHODS = listOf(VideoThumbnailMethod.EMBEDDED, VideoThumbnailMethod.PREVIEW)
         // fraction of the duration used as the preview thumbnail timestamp
-        private const val PREVIEW_TIME_FRACTION = .01
+        private const val DEFAULT_PREVIEW_TIME_FRACTION = .01
+        // never pick a timestamp earlier than this, unless that would land past
+        // half of a very short video
+        private const val PREVIEW_TIME_FLOOR_MILLIS = 3000L
+        private const val PREVIEW_TIME_FLOOR_MAX_FRACTION = .5
         private const val TIME_FRAME_ANY: Long = -1
         private const val TIME_FRAME_FIRST: Long = 0
         private const val FRAME_OPTION = MediaMetadataRetriever.OPTION_CLOSEST_SYNC

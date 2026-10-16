@@ -55,6 +55,8 @@ abstract class MediaFetchService {
     String? uriOverride,
     // HTTP headers the platform needs to read the resource (e.g. WebDAV Basic auth)
     Map<String, String>? httpHeaders,
+    // fraction of the video duration the frame is taken at
+    double? previewFraction,
     Object? taskKey,
     int? priority,
   });
@@ -324,6 +326,7 @@ class PlatformMediaFetchService implements MediaFetchService {
     required ThumbnailProviderKey request,
     String? uriOverride,
     Map<String, String>? httpHeaders,
+    double? previewFraction,
     Object? taskKey,
     int? priority,
   }) {
@@ -333,6 +336,7 @@ class PlatformMediaFetchService implements MediaFetchService {
       request: request,
       uri: uriOverride ?? request.uri,
       httpHeaders: httpHeaders,
+      previewFraction: previewFraction,
     );
     return servicePolicy.call(
       () => _getBytes(mimeType: request.mimeType, arguments: args),
@@ -346,6 +350,7 @@ class PlatformMediaFetchService implements MediaFetchService {
     required ThumbnailProviderKey request,
     required String uri,
     Map<String, String>? httpHeaders,
+    double? previewFraction,
   }) {
     final extentDip = request.extent;
     return <String, Object?>{
@@ -361,6 +366,7 @@ class PlatformMediaFetchService implements MediaFetchService {
       'heightDip': extentDip,
       'videoMethods': request.videoThumbnailMethods?.map((v) => v.name).toList(),
       if (httpHeaders != null && httpHeaders.isNotEmpty) 'httpHeaders': httpHeaders,
+      'previewFraction': ?previewFraction,
     };
   }
 
