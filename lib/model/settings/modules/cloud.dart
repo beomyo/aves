@@ -108,6 +108,20 @@ mixin CloudSettings on SettingsAccess {
 
   set cloudSort(String newValue) => set(SettingKeys.cloudSortKey, newValue);
 
+  // remote video frames are extracted over the network, which is expensive,
+  // so the whole feature can be turned off
+  bool get cloudVideoThumbnails => getBool(SettingKeys.cloudVideoThumbnailsKey) ?? true;
+
+  set cloudVideoThumbnails(bool newValue) => set(SettingKeys.cloudVideoThumbnailsKey, newValue);
+
+  bool get cloudVideoDurationVisible => getBool(SettingKeys.cloudVideoDurationKey) ?? true;
+
+  set cloudVideoDurationVisible(bool newValue) => set(SettingKeys.cloudVideoDurationKey, newValue);
+
+  bool get cloudVideoPlayIcon => getBool(SettingKeys.cloudVideoPlayIconKey) ?? true;
+
+  set cloudVideoPlayIcon(bool newValue) => set(SettingKeys.cloudVideoPlayIconKey, newValue);
+
   // URLs of folders already opened and of media already played, rendered dimmed
   List<String> get cloudVisited => getStringList(SettingKeys.cloudVisitedFoldersKey) ?? const [];
 
@@ -153,6 +167,21 @@ mixin CloudSettings on SettingsAccess {
       if (current != null && current.$1 == positionMillis && current.$2 == durationMillis) return;
       map[url] = (positionMillis, durationMillis);
     }
+    _writeCloudVideoPositions(map);
+  }
+
+  // records the duration probed while extracting a thumbnail, keeping any
+  // playback position already stored for that video
+  void setCloudVideoDuration(String url, int durationMillis) {
+    if (url.isEmpty || durationMillis <= 0) return;
+    final map = _cloudVideoPositions;
+    final current = map[url];
+    if (current != null && current.$2 == durationMillis) return;
+    map[url] = (current?.$1 ?? 0, durationMillis);
+    _writeCloudVideoPositions(map);
+  }
+
+  void _writeCloudVideoPositions(Map<String, (int, int)> map) {
     final entries = map.entries.toList();
     // keep the most recently watched entries, not the oldest
     final capped = entries.length > 4000 ? entries.sublist(entries.length - 4000) : entries;

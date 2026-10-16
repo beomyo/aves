@@ -243,6 +243,7 @@ class ImageByteStreamHandler(private val context: Context, private val arguments
         val widthDip = (arguments["widthDip"] as Number?)?.toDouble()
         val heightDip = (arguments["heightDip"] as Number?)?.toDouble()
         val videoMethods = (arguments["videoMethods"] as List<*>?)?.filterIsInstance<String>()?.mapNotNull { VideoThumbnailMethod.fromKey(it) }
+        val httpHeaders = (arguments["httpHeaders"] as? Map<*, *>)?.entries?.associate { it.key.toString() to it.value.toString() }
 
         if (uri == null || mimeType == null || rotationDegrees == null || isFlipped == null || widthDip == null || heightDip == null) {
             error("getThumbnail-args", "missing arguments", null)
@@ -262,6 +263,7 @@ class ImageByteStreamHandler(private val context: Context, private val arguments
             widthDip = widthDip,
             heightDip = heightDip,
             videoMethods = videoMethods,
+            httpHeaders = httpHeaders,
             result = this,
         ).fetch()
     }

@@ -66,6 +66,9 @@ class CloudViewOptionsSheet extends StatelessWidget {
         final sort = settings.cloudSort;
         final showNames = settings.cloudShowNames;
         final showSizes = settings.cloudShowSizes;
+        final videoThumbnails = settings.cloudVideoThumbnails;
+        final videoDuration = settings.cloudVideoDurationVisible;
+        final videoPlayIcon = settings.cloudVideoPlayIcon;
         final viewerThumbnails = settings.cloudViewerThumbnails;
         final immersive = settings.cloudImmersive;
 
@@ -134,6 +137,24 @@ class CloudViewOptionsSheet extends StatelessWidget {
                   value: showSizes,
                   onChanged: (v) => settings.cloudShowSizes = v,
                 ),
+                const Divider(height: 24),
+                _sectionTitle(context, l10n.cloudLayoutVideo),
+                SwitchListTile(
+                  title: Text(l10n.cloudShowVideoThumbnails),
+                  value: videoThumbnails,
+                  onChanged: (v) => settings.cloudVideoThumbnails = v,
+                ),
+                SwitchListTile(
+                  title: Text(l10n.cloudShowVideoDuration),
+                  value: videoDuration,
+                  onChanged: (v) => settings.cloudVideoDurationVisible = v,
+                ),
+                SwitchListTile(
+                  title: Text(l10n.cloudShowVideoPlayIcon),
+                  value: videoPlayIcon,
+                  onChanged: (v) => settings.cloudVideoPlayIcon = v,
+                ),
+                const Divider(height: 24),
                 SwitchListTile(
                   title: Text(l10n.cloudViewerThumbnails),
                   value: viewerThumbnails,

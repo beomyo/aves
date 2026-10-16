@@ -63,6 +63,17 @@ class CloudDiskCache {
     }
   }
 
+  Future<void> remove(String url) async {
+    try {
+      final file = await _fileFor(url);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (error) {
+      debugPrint('cloud cache remove failed for $url error=$error');
+    }
+  }
+
   Future<void> _evict() async {
     try {
       final dir = await _cacheDir();

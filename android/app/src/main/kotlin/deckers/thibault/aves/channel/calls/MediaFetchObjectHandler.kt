@@ -7,6 +7,7 @@ import androidx.core.net.toUri
 import com.bumptech.glide.Glide
 import deckers.thibault.aves.channel.calls.Coresult.Companion.safe
 import deckers.thibault.aves.decoding.RegionFetcher
+import deckers.thibault.aves.glide.VideoThumbnailInfo
 import deckers.thibault.aves.model.FieldMap
 import deckers.thibault.aves.model.provider.ImageProvider.ImageOpCallback
 import deckers.thibault.aves.model.provider.ImageProviderFactory.getProvider
@@ -24,6 +25,7 @@ class MediaFetchObjectHandler(private val context: Context) : MethodCallHandler 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "getEntry" -> ioScope.launch { safe(call, result, ::getEntry) }
+            "getVideoDuration" -> ioScope.launch { safe(call, result, ::getVideoDuration) }
             "clearDecoders" -> ioScope.launch { safe(call, result, ::clearDecoders) }
             "clearImageDiskCache" -> ioScope.launch { safe(call, result, ::clearImageDiskCache) }
             "clearImageMemoryCache" -> ioScope.launch { safe(call, result, ::clearImageMemoryCache) }
@@ -50,6 +52,17 @@ class MediaFetchObjectHandler(private val context: Context) : MethodCallHandler 
             override fun onSuccess(fields: FieldMap) = result.success(fields)
             override fun onFailure(throwable: Throwable) = result.error("getEntry-failure", "failed to get entry for uri=$uri mimeType=$mimeType", throwable.message)
         })
+    }
+
+    // duration of a video the platform already probed while extracting its
+    // thumbnail, or null when it has not been probed yet
+    private fun getVideoDuration(call: MethodCall, result: MethodChannel.Result) {
+        val uri = call.argument<String>("uri")
+        if (uri == null) {
+            result.error("getVideoDuration-args", "missing arguments", null)
+            return
+        }
+        result.success(VideoThumbnailInfo.duration(uri)?.toInt())
     }
 
     private fun clearDecoders(@Suppress("unused_parameter") call: MethodCall, result: MethodChannel.Result) {

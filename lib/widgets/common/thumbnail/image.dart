@@ -29,6 +29,10 @@ class const ThumbnailImage({
   final ValueNotifier<bool>? cancellableNotifier,
   final Object? heroTag,
   final HeroPlaceholderBuilder? heroPlaceholderBuilder,
+  // rendered instead of the default error thumbnail (e.g. a video placeholder)
+  final Widget? errorPlaceholder,
+  // called with the loaded image info (e.g. to record the real aspect ratio)
+  final ValueChanged<ImageInfo>? onImageInfo,
 }) extends StatefulWidget {
   @override
   State<ThumbnailImage> createState() => _ThumbnailImageState();
@@ -141,6 +145,7 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
 
   void _onImageLoad(ImageInfo imageInfo, bool synchronousCall) {
     _replaceImage(imageInfo);
+    widget.onImageInfo?.call(imageInfo);
     _loadNextProvider(imageInfo);
   }
 
@@ -184,7 +189,7 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
   Widget build(BuildContext context) {
     final animate = context.select<Settings, bool>((v) => v.animate);
     if (!entry.isDecodingSupported || _lastException != null) {
-      return _buildError(context, animate);
+      return widget.errorPlaceholder ?? _buildError(context, animate);
     }
 
     // use `RawImage` instead of `Image`, using `ImageInfo` to check dimensions

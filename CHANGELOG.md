@@ -25,6 +25,23 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.4"></a>[v1.19.4] - 2026-10-16
+
+### Added
+
+- Cloud: video thumbnails. A frame is extracted from each remote video and cached on disk, so it is not fetched again after a restart
+- Cloud: video duration on thumbnails
+- Cloud: options to turn video thumbnails, the duration badge and the play icon on or off
+
+### Changed
+
+- Cloud: the video frame is taken 1% into the video, to skip the black frame many videos open with
+- Cloud: the play icon moved to the bottom left of the thumbnail
+
+### Fixed
+
+- Cloud: remote video thumbnails use the real aspect ratio in the mosaic layout
+
 ## <a id="v1.15.5"></a>[v1.15.5] - 2026-10-02
 
 ### Added

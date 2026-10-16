@@ -24,6 +24,11 @@ class SmbClient implements CloudClient {
 
   String get _host => server.uri?.host ?? server.url;
 
+  // SMB resources are only reachable through the loopback HTTP bridge, which
+  // carries the credentials in the connection itself, so no header is needed.
+  @override
+  Map<String, String> get requestHeaders => const {};
+
   Future<SmbConnect> _sureConnect() async {
     final existing = _connect;
     if (existing != null) return existing;

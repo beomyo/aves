@@ -22,7 +22,7 @@ class MpvVideoMetadataFetcher extends AvesVideoMetadataFetcher {
   @override
   void init() => MediaKit.ensureInitialized();
 
-  Future<Player?> _openBackgroundPlayer({required String uri, required String mimeType}) async {
+  Future<Player?> _openBackgroundPlayer({required String uri, required String mimeType, Map<String, String>? httpHeaders}) async {
     final player = Player(
       configuration: PlayerConfiguration(
         logLevel: .warn,
@@ -53,7 +53,7 @@ class MpvVideoMetadataFetcher extends AvesVideoMetadataFetcher {
       }
     });
 
-    await player.open(Media(uri), play: false);
+    await player.open(Media(uri, httpHeaders: httpHeaders), play: false);
 
     final timeoutMillis = mimeType.startsWith('image') ? probeTimeoutImage : probeTimeoutVideo;
     await Future.any([videoDecodedCompleter.future, Future.delayed(Duration(milliseconds: timeoutMillis))]);
@@ -355,10 +355,11 @@ class MpvVideoMetadataFetcher extends AvesVideoMetadataFetcher {
     required String mimeType,
     required double targetExtentDip,
     required List<VideoThumbnailMethod> methods,
+    Map<String, String>? httpHeaders,
   }) async {
     if (targetExtentDip == 0) return null;
 
-    final player = await _openBackgroundPlayer(uri: uri, mimeType: mimeType);
+    final player = await _openBackgroundPlayer(uri: uri, mimeType: mimeType, httpHeaders: httpHeaders);
     if (player == null) return null;
 
     final bgra = await _getPreferredThumbnail(player, methods);

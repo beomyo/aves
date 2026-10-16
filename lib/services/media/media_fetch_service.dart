@@ -45,6 +45,23 @@ abstract class MediaFetchService {
     int? priority,
   });
 
+  // raw platform thumbnail bytes, without decoding, so a caller (the cloud
+  // layer) can cache them and decode them itself. Empty when the platform could
+  // not produce any.
+  Future<Uint8List> getThumbnailBytes({
+    required bool decoded,
+    required ThumbnailProviderKey request,
+    // URL to fetch instead of `request.uri` (e.g. the SMB loopback bridge)
+    String? uriOverride,
+    // HTTP headers the platform needs to read the resource (e.g. WebDAV Basic auth)
+    Map<String, String>? httpHeaders,
+    Object? taskKey,
+    int? priority,
+  });
+
+  // duration in milliseconds of a video the platform already probed, if known
+  Future<int?> getVideoDuration(String uri);
+
   Future<void> clearDecoders();
 
   Future<void> clearImageDiskCache();
@@ -269,19 +286,7 @@ class PlatformMediaFetchService implements MediaFetchService {
     final uri = request.uri;
     final mimeType = request.mimeType;
     final extentDip = request.extent;
-    final args = <String, Object?>{
-      'op': 'getThumbnail',
-      'decoded': decoded,
-      'uri': uri,
-      'pageId': request.pageId,
-      'mimeType': mimeType,
-      'dateModifiedMillis': request.dateModifiedMillis,
-      'rotationDegrees': request.rotationDegrees,
-      'isFlipped': request.isFlipped,
-      'widthDip': extentDip,
-      'heightDip': extentDip,
-      'videoMethods': request.videoThumbnailMethods?.map((v) => v.name).toList(),
-    };
+    final args = _thumbnailArguments(decoded: decoded, request: request, uri: uri);
     return servicePolicy.call(
       () async {
         final bytes = await _getBytes(
@@ -311,6 +316,62 @@ class PlatformMediaFetchService implements MediaFetchService {
       priority: priority ?? (extentDip == 0 ? ServiceCallPriority.getFastThumbnail : ServiceCallPriority.getSizedThumbnail),
       key: taskKey,
     );
+  }
+
+  @override
+  Future<Uint8List> getThumbnailBytes({
+    required bool decoded,
+    required ThumbnailProviderKey request,
+    String? uriOverride,
+    Map<String, String>? httpHeaders,
+    Object? taskKey,
+    int? priority,
+  }) {
+    final extentDip = request.extent;
+    final args = _thumbnailArguments(
+      decoded: decoded,
+      request: request,
+      uri: uriOverride ?? request.uri,
+      httpHeaders: httpHeaders,
+    );
+    return servicePolicy.call(
+      () => _getBytes(mimeType: request.mimeType, arguments: args),
+      priority: priority ?? (extentDip == 0 ? ServiceCallPriority.getFastThumbnail : ServiceCallPriority.getSizedThumbnail),
+      key: taskKey,
+    );
+  }
+
+  static Map<String, Object?> _thumbnailArguments({
+    required bool decoded,
+    required ThumbnailProviderKey request,
+    required String uri,
+    Map<String, String>? httpHeaders,
+  }) {
+    final extentDip = request.extent;
+    return <String, Object?>{
+      'op': 'getThumbnail',
+      'decoded': decoded,
+      'uri': uri,
+      'pageId': request.pageId,
+      'mimeType': request.mimeType,
+      'dateModifiedMillis': request.dateModifiedMillis,
+      'rotationDegrees': request.rotationDegrees,
+      'isFlipped': request.isFlipped,
+      'widthDip': extentDip,
+      'heightDip': extentDip,
+      'videoMethods': request.videoThumbnailMethods?.map((v) => v.name).toList(),
+      if (httpHeaders != null && httpHeaders.isNotEmpty) 'httpHeaders': httpHeaders,
+    };
+  }
+
+  @override
+  Future<int?> getVideoDuration(String uri) async {
+    try {
+      return await _platformObject.invokeMethod<int>('getVideoDuration', {'uri': uri});
+    } on PlatformException catch (e, stack) {
+      await reportService.recordError(e, stack);
+    }
+    return null;
   }
 
   @override
@@ -344,7 +405,10 @@ class PlatformMediaFetchService implements MediaFetchService {
   bool cancelRegion(Object taskKey) => servicePolicy.pause(taskKey, [ServiceCallPriority.getRegion]);
 
   @override
-  bool cancelThumbnail(Object taskKey) => servicePolicy.pause(taskKey, [ServiceCallPriority.getFastThumbnail, ServiceCallPriority.getSizedThumbnail]);
+  bool cancelThumbnail(Object taskKey) => servicePolicy.pause(
+    taskKey,
+    [ServiceCallPriority.getFastThumbnail, ServiceCallPriority.getSizedThumbnail, ServiceCallPriority.getVideoThumbnail],
+  );
 
   @override
   Future<T>? resumeLoading<T>(Object taskKey) => servicePolicy.resume<T>(taskKey);

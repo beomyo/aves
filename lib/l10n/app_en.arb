@@ -1215,6 +1215,9 @@
   "cloudLayoutPerFolder": "Remember layout per folder",
   "cloudShowFileSizes": "Show file sizes",
   "cloudViewerThumbnails": "Thumbnail strip in the viewer",
+  "cloudShowVideoThumbnails": "Video thumbnails",
+  "cloudShowVideoDuration": "Show video duration",
+  "cloudShowVideoPlayIcon": "Show play icon",
   "cloudSortNameAsc": "Name (A to Z)",
   "cloudSortNameDesc": "Name (Z to A)"
 }

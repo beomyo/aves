@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:aves_model/aves_model.dart';
@@ -16,15 +15,19 @@ abstract class AvesVideoMetadataFetcher {
     required String mimeType,
     required double targetExtentDip,
     required List<VideoThumbnailMethod> methods,
+    // HTTP headers the backend needs to read a remote resource (e.g. WebDAV Basic auth)
+    Map<String, String>? httpHeaders,
   });
 
-  static const _shortDuration = Duration(seconds: 15);
+  // fraction of the duration used as the preview thumbnail timestamp: starting
+  // slightly after the beginning skips the black/logo frames many videos open with
+  static const double previewTimeFraction = .01;
 
   // use same strategy on flutter and platform sides
   Duration getPreviewThumbnailTime(Duration duration) {
-    if (duration < _shortDuration) {
+    if (duration <= Duration.zero) {
       return Duration.zero;
     }
-    return Duration(milliseconds: min((duration.inMilliseconds / 2).round(), _shortDuration.inMilliseconds));
+    return Duration(milliseconds: (duration.inMilliseconds * previewTimeFraction).round());
   }
 }

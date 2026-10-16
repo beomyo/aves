@@ -45,6 +45,7 @@ class ThumbnailFetcher internal constructor(
     widthDip: Double?,
     heightDip: Double?,
     private val videoMethods: List<VideoThumbnailMethod>?,
+    private val httpHeaders: Map<String, String>? = null,
     private val result: ByteSink,
 ) {
     private val density = context.devicePixelRatio()
@@ -170,7 +171,7 @@ class ThumbnailFetcher internal constructor(
         val target = Glide.with(context)
             .asBitmap()
             .apply(options)
-            .load(AvesAppGlideModule.getModel(context, uri, mimeType, pageId, videoMethods = videoMethods))
+            .load(AvesAppGlideModule.getModel(context, uri, mimeType, pageId, videoMethods = videoMethods, httpHeaders = httpHeaders))
             .submit(width, height)
 
         return try {

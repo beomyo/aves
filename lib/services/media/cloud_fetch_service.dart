@@ -1,11 +1,15 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:aves/image_providers/region_provider.dart';
 import 'package:aves/image_providers/thumbnail_provider.dart';
 import 'package:aves/model/entry/entry.dart';
+import 'package:aves/model/settings/settings.dart';
+import 'package:aves/ref/mime_types.dart';
 import 'package:aves/services/common/cloud_registry.dart';
 import 'package:aves/services/common/service_policy.dart';
+import 'package:aves/services/common/services.dart';
 import 'package:aves/services/media/cloud_client.dart';
 import 'package:aves/services/media/cloud_disk_cache.dart';
 import 'package:aves/services/media/media_fetch_service.dart';
@@ -42,7 +46,7 @@ class CloudImageLoader {
 
   // decodes while bounding the longest side to `maxDim` (never upscaling),
   // so memory stays proportional to the tile/screen size instead of the file
-  static Future<ui.Codec> _decodeBounded(Uint8List bytes, ImageDecoderCallback decode, int maxDim) async {
+  static Future<ui.Codec> decodeBounded(Uint8List bytes, ImageDecoderCallback decode, int maxDim) async {
     final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
     return decode(
       buffer,
@@ -93,6 +97,14 @@ class CloudImageLoader {
     return null;
   }
 
+  // largest side to decode a thumbnail at, for a tile of the given extent
+  static int thumbnailMaxDim(double extent) {
+    final devicePixelRatio = ui.PlatformDispatcher.instance.views.firstOrNull?.devicePixelRatio ?? 1.0;
+    final requested = extent > 0 ? (extent * devicePixelRatio).round() : 256;
+    // cap the thumbnail size so a huge mosaic tile cannot decode a huge bitmap
+    return requested.clamp(1, _maxThumbnailDim);
+  }
+
   Future<ui.Codec> loadThumbnail(
     ThumbnailProviderKey request,
     ImageDecoderCallback? decode,
@@ -100,14 +112,11 @@ class CloudImageLoader {
     int? priority,
   ) {
     final extent = request.extent;
-    final devicePixelRatio = ui.PlatformDispatcher.instance.views.firstOrNull?.devicePixelRatio ?? 1.0;
-    final requested = extent > 0 ? (extent * devicePixelRatio).round() : 256;
-    // cap the thumbnail size so a huge mosaic tile cannot decode a huge bitmap
-    final maxDim = requested.clamp(1, _maxThumbnailDim);
+    final maxDim = thumbnailMaxDim(extent);
     return servicePolicy.call(
       () async {
         final bytes = await bytesFor(request.uri);
-        return _decodeBounded(bytes, _decoderFor(decode), maxDim);
+        return decodeBounded(bytes, decoderFor(decode), maxDim);
       },
       priority: priority ?? (extent == 0 ? ServiceCallPriority.getFastThumbnail : ServiceCallPriority.getSizedThumbnail),
       key: taskKey,
@@ -126,7 +135,7 @@ class CloudImageLoader {
     return servicePolicy.call(
       () async {
         final bytes = await bytesFor(request.uri);
-        return _decodeBounded(bytes, decode, maxDim);
+        return decodeBounded(bytes, decode, maxDim);
       },
       priority: ServiceCallPriority.normal,
     );
@@ -134,7 +143,7 @@ class CloudImageLoader {
 
   // the framework provides a decoder for sized thumbnails; fall back to
   // `instantiateImageCodec` when it is missing
-  static ImageDecoderCallback _decoderFor(ImageDecoderCallback? decode) {
+  static ImageDecoderCallback decoderFor(ImageDecoderCallback? decode) {
     if (decode != null) return decode;
     throw UnreportedStateError('missing decoder for cloud thumbnail');
   }
@@ -146,9 +155,18 @@ final cloudImageLoader = CloudImageLoader();
 // (WebDAV / SMB entries) are served from the network while every other URI
 // keeps using the platform implementation unchanged.
 class CloudAwareMediaFetchService implements MediaFetchService {
-  final MediaFetchService _delegate;
+  // remote video frames are extracted on demand and can be slow, so bound them
+  // and back off per file after a failure so scrolling cannot retry the same
+  // dead file over and over
+  static const _videoThumbnailTimeout = Duration(seconds: 10);
+  static const _videoThumbnailCooldown = Duration(seconds: 60);
+  // extracted frames live in `cloudDiskCache`, so they survive a restart
+  static const _videoThumbnailCachePrefix = 'video-thumb:';
 
-  const new(this._delegate);
+  final MediaFetchService _delegate;
+  final Map<String, DateTime> _videoThumbCooldown = {};
+
+  new(this._delegate);
 
   @override
   Future<AvesEntry?> getEntry(String uri, String? mimeType, {bool allowUnsized = false}) {
@@ -198,9 +216,133 @@ class CloudAwareMediaFetchService implements MediaFetchService {
     int? priority,
   }) {
     if (isCloudUri(request.uri)) {
+      if (MimeTypes.isVideo(request.mimeType)) {
+        return _getCloudVideoThumbnail(
+          decoded: decoded,
+          request: request,
+          decode: decode,
+          taskKey: taskKey,
+          priority: priority,
+        );
+      }
       return cloudImageLoader.loadThumbnail(request, decode, taskKey, priority);
     }
     return _delegate.getThumbnail(decoded: decoded, request: request, decode: decode, taskKey: taskKey, priority: priority);
+  }
+
+  @override
+  Future<Uint8List> getThumbnailBytes({
+    required bool decoded,
+    required ThumbnailProviderKey request,
+    String? uriOverride,
+    Map<String, String>? httpHeaders,
+    Object? taskKey,
+    int? priority,
+  }) {
+    return _delegate.getThumbnailBytes(
+      decoded: decoded,
+      request: request,
+      uriOverride: uriOverride,
+      httpHeaders: httpHeaders,
+      taskKey: taskKey,
+      priority: priority,
+    );
+  }
+
+  @override
+  Future<int?> getVideoDuration(String uri) => _delegate.getVideoDuration(uri);
+
+  // remote videos are extracted as a frame by the platform, which needs the
+  // playable URL and the auth headers of the owning server. The extracted frame
+  // is cached on disk so that a restart does not fetch it again, and libmpv is
+  // used as a fallback for containers the platform cannot decode.
+  Future<ui.Codec> _getCloudVideoThumbnail({
+    required bool decoded,
+    required ThumbnailProviderKey request,
+    ImageDecoderCallback? decode,
+    Object? taskKey,
+    int? priority,
+  }) async {
+    final uri = request.uri;
+    final decoder = CloudImageLoader.decoderFor(decode);
+    final maxDim = CloudImageLoader.thumbnailMaxDim(request.extent);
+    final cacheKey = '$_videoThumbnailCachePrefix$uri';
+    final cached = await cloudDiskCache.get(cacheKey);
+    if (cached != null) {
+      try {
+        return await CloudImageLoader.decodeBounded(cached, decoder, maxDim);
+      } catch (_) {
+        // drop a corrupt entry so the next attempt extracts a fresh frame
+        unawaited(cloudDiskCache.remove(cacheKey));
+      }
+    }
+
+    final cooldownUntil = _videoThumbCooldown[uri];
+    if (cooldownUntil != null && DateTime.now().isBefore(cooldownUntil)) {
+      throw const CloudException('video thumbnail temporarily unavailable');
+    }
+
+    try {
+      final source = await cloudRegistry.playbackSource(uri);
+      final headers = source.headers.isEmpty ? null : source.headers;
+      final bytes = await _delegate
+          .getThumbnailBytes(
+            decoded: decoded,
+            request: request,
+            uriOverride: source.url,
+            httpHeaders: headers,
+            taskKey: taskKey,
+            priority: priority ?? ServiceCallPriority.getVideoThumbnail,
+          )
+          .timeout(_videoThumbnailTimeout);
+      if (bytes.isNotEmpty) {
+        final codec = await CloudImageLoader.decodeBounded(bytes, decoder, maxDim);
+        // only cache a frame that decoded, so a bad entry cannot wedge the tile
+        unawaited(cloudDiskCache.put(cacheKey, bytes));
+        unawaited(_recordVideoDuration(uri, source.url));
+        return codec;
+      }
+
+      // the platform could not extract a frame from this container: let libmpv try
+      final descriptor = await videoMetadataFetcher
+          .getThumbnailDescriptor(
+            uri: source.url,
+            mimeType: request.mimeType,
+            targetExtentDip: request.extent,
+            methods: request.videoThumbnailMethods ?? [],
+            httpHeaders: headers,
+          )
+          .timeout(_videoThumbnailTimeout);
+      final codec = await descriptor?.instantiateCodec(
+        targetWidth: descriptor.width,
+        targetHeight: descriptor.height,
+      );
+      if (codec == null) {
+        throw const CloudException('failed to extract a video frame');
+      }
+      return codec;
+    } catch (error) {
+      // a task paused while the tile scrolled away never completes, so the
+      // timeout above fires without the file being at fault: do not back it off
+      final pausedDuringWait = error is TimeoutException && taskKey != null && servicePolicy.isPaused(taskKey);
+      if (!pausedDuringWait) {
+        _videoThumbCooldown[uri] = DateTime.now().add(_videoThumbnailCooldown);
+      }
+      rethrow;
+    }
+  }
+
+  // the platform probes the duration while extracting the frame; persist it so
+  // the tile can show it, and so it survives a restart
+  Future<void> _recordVideoDuration(String uri, String probedUri) async {
+    try {
+      final durationMillis = await _delegate.getVideoDuration(probedUri);
+      if (durationMillis != null && durationMillis > 0) {
+        settings.setCloudVideoDuration(uri, durationMillis);
+      }
+    } catch (_) {
+      // best effort only
+    }
   }
 
   @override

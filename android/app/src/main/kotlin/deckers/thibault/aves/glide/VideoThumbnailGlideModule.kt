@@ -35,7 +35,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.io.ByteArrayInputStream
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 @GlideModule
@@ -45,7 +44,7 @@ class VideoThumbnailGlideModule : LibraryGlideModule() {
     }
 }
 
-class VideoThumbnail(val context: Context, val uri: Uri, val methods: List<VideoThumbnailMethod>)
+class VideoThumbnail(val context: Context, val uri: Uri, val methods: List<VideoThumbnailMethod>, val httpHeaders: Map<String, String>? = null)
 
 internal class VideoThumbnailLoader : ModelLoader<VideoThumbnail, Bitmap> {
     override fun buildLoadData(model: VideoThumbnail, width: Int, height: Int, options: Options): ModelLoader.LoadData<Bitmap> {
@@ -66,10 +65,12 @@ internal class VideoThumbnailFetcher(private val model: VideoThumbnail, val widt
 
     override fun loadData(priority: Priority, callback: DataCallback<in Bitmap>) {
         ioScope.launch {
-            val retriever = openMetadataRetriever(model.context, model.uri)
+            val retriever = openMetadataRetriever(model.context, model.uri, model.httpHeaders)
             if (retriever == null) {
                 callback.onLoadFailed(Exception("failed to initialize MediaMetadataRetriever for uri=${model.uri}"))
             } else {
+                // remember the duration so the UI can show it without opening the video again
+                retriever.getSafeLong(MediaMetadataRetriever.METADATA_KEY_DURATION) { VideoThumbnailInfo.putDuration(model.uri.toString(), it) }
                 val methods = arrayListOf<VideoThumbnailMethod>().apply {
                     addAll(model.methods)
                     addAll(DEFAULT_METHODS)
@@ -186,11 +187,13 @@ internal class VideoThumbnailFetcher(private val model: VideoThumbnail, val widt
     //
     // use same strategy on flutter and platform sides
     private fun getPreviewTimeMicrosFromDuration(durationMillis: Long?): Long {
-        if (durationMillis == null || durationMillis < SHORT_DURATION_MILLIS) {
+        if (durationMillis == null || durationMillis <= 0) {
             return TIME_FRAME_FIRST
         }
 
-        val timeMillis = min(durationMillis / 2, SHORT_DURATION_MILLIS)
+        // start slightly after the beginning, as many videos open with a black
+        // or logo frame
+        val timeMillis = (durationMillis * PREVIEW_TIME_FRACTION).toLong()
         return timeMillis * 1000
     }
 
@@ -247,12 +250,13 @@ internal class VideoThumbnailFetcher(private val model: VideoThumbnail, val widt
 
     override fun getDataClass(): Class<Bitmap> = Bitmap::class.java
 
-    override fun getDataSource(): DataSource = DataSource.LOCAL
+    override fun getDataSource(): DataSource = if (model.uri.scheme == "http" || model.uri.scheme == "https") DataSource.REMOTE else DataSource.LOCAL
 
     companion object {
         private val LOG_TAG = LogUtils.createTag<VideoThumbnailFetcher>()
         private val DEFAULT_METHODS = listOf(VideoThumbnailMethod.EMBEDDED, VideoThumbnailMethod.PREVIEW)
-        private const val SHORT_DURATION_MILLIS: Long = 15000
+        // fraction of the duration used as the preview thumbnail timestamp
+        private const val PREVIEW_TIME_FRACTION = .01
         private const val TIME_FRAME_ANY: Long = -1
         private const val TIME_FRAME_FIRST: Long = 0
         private const val FRAME_OPTION = MediaMetadataRetriever.OPTION_CLOSEST_SYNC

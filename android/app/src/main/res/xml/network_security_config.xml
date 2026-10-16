@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+      Remote services are configured by the user and are commonly reached over
+      plain http on a LAN (WebDAV servers such as OpenList/AList, and the
+      loopback http bridge used for SMB). The Android media stack used to extract
+      remote video thumbnails is subject to this policy, so cleartext must be
+      permitted for those requests to work. Dart's own HTTP client and mpv are
+      not subject to this policy.
+    -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

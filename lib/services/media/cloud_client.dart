@@ -16,6 +16,11 @@ class CloudException implements Exception {
 
 // common contract implemented by every remote service backend (WebDAV, SMB, ...)
 abstract class CloudClient {
+  // headers a consumer must send to fetch a resource directly from this
+  // backend (e.g. WebDAV Basic auth). Empty when the backend needs none,
+  // which is the case for SMB since it is served through the loopback bridge.
+  Map<String, String> get requestHeaders;
+
   // lists the entries of a folder
   Future<List<CloudResource>> list(String url);
 

@@ -1045,6 +1045,9 @@
     "cloudLayoutPerFolder": "個別記住每個資料夾的檢視",
     "cloudShowFileSizes": "顯示檔案大小",
     "cloudViewerThumbnails": "圖片檢視器縮圖列",
+    "cloudShowVideoThumbnails": "影片縮圖",
+    "cloudShowVideoDuration": "顯示影片長度",
+    "cloudShowVideoPlayIcon": "顯示播放圖示",
     "cloudSortNameAsc": "名稱升冪（A→Z）",
     "cloudSortNameDesc": "名稱降冪（Z→A）"
 }

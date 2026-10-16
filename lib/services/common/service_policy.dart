@@ -122,6 +122,8 @@ class ServiceCallPriority {
   static const int getFastThumbnail = 100;
   static const int getRegion = 150;
   static const int getSizedThumbnail = 200;
+  // remote video frames are expensive to extract, so they yield to visible image thumbnails
+  static const int getVideoThumbnail = 250;
   static const int normal = 500;
   static const int getMetadata = 1000;
   static const int getLocation = 1000;

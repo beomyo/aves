@@ -11,6 +11,7 @@ import 'package:aves/ref/mime_types.dart';
 import 'package:aves/services/common/cloud_registry.dart';
 import 'package:aves/services/media/cloud_fetch_service.dart';
 import 'package:aves/services/media/cloud_mime.dart';
+import 'package:aves/theme/format.dart';
 import 'package:aves/theme/icons.dart';
 import 'package:aves/utils/file_utils.dart';
 import 'package:aves/widgets/common/basic/draggable_scrollbar/scrollbar.dart';
@@ -30,6 +31,14 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 enum _LoadState { loading, ready, error }
+
+// duration badge of a cloud video, or null when it is unknown or hidden
+String? _cloudVideoDurationText(AvesEntry entry, {required bool visible}) {
+  if (!entry.isVideo || !visible) return null;
+  final durationMillis = settings.cloudVideoDuration(entry.uri);
+  if (durationMillis == null || durationMillis <= 0) return null;
+  return formatFriendlyDuration(Duration(milliseconds: durationMillis));
+}
 
 class CloudBrowserPage extends StatefulWidget {
   static const routeName = '/cloud/browse';
@@ -85,20 +94,25 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     _currentUrl = widget.initialUrl ?? _baseUrl;
     _history = _ancestorsFor(_currentUrl);
     _scrollController.addListener(_onScroll);
-    _settingsSub = settings.updateStream
-        .where(
-          (event) => const [
-            SettingKeys.cloudImageLayoutKey,
-            SettingKeys.cloudVideoLayoutKey,
-            SettingKeys.cloudFolderLayoutsKey,
-            SettingKeys.cloudLayoutPerFolderKey,
-          ].contains(event.key),
-        )
-        .listen((_) {
-          if (_resolvedLayout(_media.value) == 'mosaic') {
-            _maybeProbe(_media.value, 'mosaic');
-          }
-        });
+    _settingsSub = settings.updateStream.listen((event) {
+      if (const [
+        SettingKeys.cloudImageLayoutKey,
+        SettingKeys.cloudVideoLayoutKey,
+        SettingKeys.cloudFolderLayoutsKey,
+        SettingKeys.cloudLayoutPerFolderKey,
+      ].contains(event.key)) {
+        if (_resolvedLayout(_media.value) == 'mosaic') {
+          _maybeProbe(_media.value, 'mosaic');
+        }
+      } else if (event.key == SettingKeys.cloudVideoPositionsKey) {
+        // a duration probed while extracting a thumbnail arrived in the
+        // background: refresh the badges (the video player writes this key too,
+        // hence the visible-route guard)
+        if (mounted && (ModalRoute.of(context)?.isCurrent ?? false)) {
+          setState(() {});
+        }
+      }
+    });
     _fetch();
   }
 
@@ -321,7 +335,17 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     });
   }
 
-  double _aspectOf(AvesEntry entry) => (entry.isVideo ? 16 / 9 : (_aspects[entry.uri] ?? 1.0)).clamp(0.35, 2.6);
+  // records the real aspect ratio of a video, taken from its extracted frame,
+  // so the mosaic layout does not have to fall back to 16/9
+  void _onTileAspect(String uri, double aspect) {
+    if (!mounted || !aspect.isFinite || aspect <= 0) return;
+    final current = _aspects[uri];
+    if (current != null && (current - aspect).abs() / current < 0.02) return;
+    _aspects[uri] = aspect;
+    _scheduleAspectFlush();
+  }
+
+  double _aspectOf(AvesEntry entry) => (entry.isVideo ? (_aspects[entry.uri] ?? 16 / 9) : (_aspects[entry.uri] ?? 1.0)).clamp(0.35, 2.6);
 
   void _onScaleStart(ScaleStartDetails details) {
     _scaleStartColumns = settings.cloudColumns;
@@ -706,33 +730,45 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
 
   Widget _buildListSliver(BuildContext context, List<AvesEntry> entries, bool showNames, bool showSizes) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
+    final showVideoThumbnails = context.select<Settings, bool>((s) => s.cloudVideoThumbnails);
+    final showVideoDuration = context.select<Settings, bool>((s) => s.cloudVideoDurationVisible);
+    final showVideoPlayIcon = context.select<Settings, bool>((s) => s.cloudVideoPlayIcon);
     return SliverList.builder(
       itemCount: entries.length,
       itemBuilder: (context, index) {
         final entry = entries[index];
         final watched = entry.isVideo && settings.isCloudVisited(entry.uri);
-        final progress = _progressOf(entry);
         final sizeBytes = entry.sizeBytes;
+        final sizeText = (showSizes && sizeBytes != null) ? formatFileSize(settings.avesLocale, sizeBytes, round: 0) : null;
+        final durationText = _cloudVideoDurationText(entry, visible: showVideoDuration);
+        final subtitleText = [?sizeText, ?durationText].join('  ·  ');
         return ListTile(
           leading: SizedBox(
             width: 56,
             height: 56,
-            child: entry.isVideo
-                ? _VideoTileContent(progress: progress)
+            child: entry.isVideo && !showVideoThumbnails
+                ? const _VideoPlaceholder()
                 : ThumbnailImage(
                     entry: entry,
                     extent: 56,
                     devicePixelRatio: dpr,
                     fit: BoxFit.cover,
                     cancellableNotifier: _isScrolling,
+                    errorPlaceholder: entry.isVideo ? const _VideoPlaceholder() : null,
+                    onImageInfo: entry.isVideo
+                        ? (info) {
+                            final image = info.image;
+                            if (image.width > 0 && image.height > 0) _onTileAspect(entry.uri, image.width / image.height);
+                          }
+                        : null,
                   ),
           ),
           title: Text(
             entry.sourceTitle ?? entry.bestTitle ?? '',
             style: watched ? TextStyle(color: Theme.of(context).disabledColor) : null,
           ),
-          subtitle: showSizes && sizeBytes != null ? Text(formatFileSize(settings.avesLocale, sizeBytes, round: 0)) : null,
-          trailing: entry.isVideo ? const Icon(Icons.play_circle_outline, size: 20) : null,
+          subtitle: subtitleText.isEmpty ? null : Text(subtitleText),
+          trailing: entry.isVideo && showVideoPlayIcon ? const Icon(Icons.play_circle_outline, size: 20) : null,
           onTap: () => _openEntry(entries, entry),
         );
       },
@@ -764,6 +800,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
             showSize: showSizes,
             watched: entry.isVideo && settings.isCloudVisited(entry.uri),
             progress: _progressOf(entry),
+            onVideoAspect: _onTileAspect,
             onTap: () => _openEntry(entries, entry),
           );
         },
@@ -830,6 +867,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
                         watched: entries[indices[k]].isVideo && settings.isCloudVisited(entries[indices[k]].uri),
                         progress: _progressOf(entries[indices[k]]),
                         isMosaic: true,
+                        onVideoAspect: _onTileAspect,
                         onTap: () => _openEntry(entries, entries[indices[k]]),
                       ),
                     ),
@@ -844,23 +882,68 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   }
 }
 
-// plain placeholder used for video entries, with an optional watch progress
-class _VideoTileContent extends StatelessWidget {
-  final double? progress;
+// dark scrim shown behind a video tile while its frame is extracted (and kept
+// when extraction fails), so the tile never flashes a broken-image icon
+class _VideoPlaceholder extends StatelessWidget {
+  const new();
 
-  const new({this.progress});
+  @override
+  Widget build(BuildContext context) => const ColoredBox(color: Color(0x33000000));
+}
+
+// play affordance, duration badge and watch progress, stacked on top of a video
+// tile whether or not its frame could be extracted
+class _VideoOverlay extends StatelessWidget {
+  final double? progress;
+  final String? durationText;
+  final bool showPlayIcon;
+
+  const new({this.progress, this.durationText, this.showPlayIcon = true});
 
   @override
   Widget build(BuildContext context) {
     final value = progress;
+    final duration = durationText;
+    final hasProgress = value != null && value > 0;
+    // keep the bottom row clear of the progress bar
+    final bottomInset = hasProgress ? 5.0 : 3.0;
     return Stack(
       fit: StackFit.expand,
       children: [
-        const ColoredBox(color: Color(0x33000000)),
-        const Center(
-          child: Icon(Icons.play_circle_outline, color: Colors.white, size: 32),
-        ),
-        if (value != null && value > 0)
+        if (showPlayIcon)
+          Align(
+            alignment: Alignment.bottomLeft,
+            child: Padding(
+              padding: EdgeInsets.only(left: 3, bottom: bottomInset),
+              child: const Icon(
+                Icons.play_circle_outline,
+                color: Colors.white,
+                size: 22,
+                shadows: [Shadow(blurRadius: 4, color: Colors.black54)],
+              ),
+            ),
+          ),
+        if (duration != null)
+          Align(
+            alignment: Alignment.bottomRight,
+            child: Padding(
+              padding: EdgeInsets.only(right: 3, bottom: bottomInset),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  child: Text(
+                    duration,
+                    style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.2),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        if (hasProgress)
           Align(
             alignment: Alignment.bottomCenter,
             child: LinearProgressIndicator(
@@ -886,6 +969,7 @@ class _CloudTile extends StatelessWidget {
   final bool watched;
   final double? progress;
   final VoidCallback onTap;
+  final void Function(String uri, double aspect)? onVideoAspect;
 
   const new({
     super.key,
@@ -899,21 +983,63 @@ class _CloudTile extends StatelessWidget {
     this.showSize = false,
     this.watched = false,
     this.progress,
+    this.onVideoAspect,
   });
+
+  void _onVideoInfo(ImageInfo info) {
+    final image = info.image;
+    final w = image.width;
+    final h = image.height;
+    if (w <= 0 || h <= 0) return;
+    // the extracted frame keeps the video aspect ratio, so it can drive the
+    // mosaic layout the same way probed image dimensions do
+    onVideoAspect?.call(entry.uri, w / h);
+  }
 
   @override
   Widget build(BuildContext context) {
-    Widget content = entry.isVideo
-        ? _VideoTileContent(progress: progress)
-        : ThumbnailImage(
-            entry: entry,
-            extent: extent,
-            devicePixelRatio: devicePixelRatio,
-            fit: BoxFit.cover,
-            isMosaic: isMosaic,
-            cancellableNotifier: cancellableNotifier,
-            heroTag: null,
-          );
+    // options are selected here (rather than read from `settings` directly) so
+    // that toggling them applies immediately, even from the options sheet
+    final showVideoThumbnails = context.select<Settings, bool>((s) => s.cloudVideoThumbnails);
+    final showVideoDuration = context.select<Settings, bool>((s) => s.cloudVideoDurationVisible);
+    final showVideoPlayIcon = context.select<Settings, bool>((s) => s.cloudVideoPlayIcon);
+    Widget content;
+    if (entry.isVideo) {
+      content = Stack(
+        fit: StackFit.expand,
+        children: [
+          if (showVideoThumbnails)
+            ThumbnailImage(
+              entry: entry,
+              extent: extent,
+              devicePixelRatio: devicePixelRatio,
+              fit: BoxFit.cover,
+              isMosaic: isMosaic,
+              cancellableNotifier: cancellableNotifier,
+              heroTag: null,
+              errorPlaceholder: const _VideoPlaceholder(),
+              onImageInfo: _onVideoInfo,
+            )
+          else
+            const _VideoPlaceholder(),
+          _VideoOverlay(
+            progress: progress,
+            durationText: _cloudVideoDurationText(entry, visible: showVideoDuration),
+            showPlayIcon: showVideoPlayIcon,
+          ),
+        ],
+      );
+    } else {
+      content = ThumbnailImage(
+        entry: entry,
+        extent: extent,
+        devicePixelRatio: devicePixelRatio,
+        fit: BoxFit.cover,
+        isMosaic: isMosaic,
+        cancellableNotifier: cancellableNotifier,
+        heroTag: null,
+      );
+    }
     // videos already watched are dimmed
     if (watched) {
       content = Opacity(opacity: 0.55, child: content);

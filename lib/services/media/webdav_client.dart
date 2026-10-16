@@ -50,7 +50,8 @@ class WebDavClient implements CloudClient {
   @override
   void close() => _client.close();
 
-  Map<String, String> get _authHeaders {
+  @override
+  Map<String, String> get requestHeaders {
     if (server.username.isEmpty && server.password.isEmpty) return const {};
     final token = base64Encode(utf8.encode('${server.username}:${server.password}'));
     return {'Authorization': 'Basic $token'};
@@ -72,7 +73,7 @@ class WebDavClient implements CloudClient {
     final requestUrl = resolve(url);
     final request = http.Request('PROPFIND', requestUrl)
       ..headers.addAll({
-        ..._authHeaders,
+        ...requestHeaders,
         'Depth': '1',
         'Content-Type': 'application/xml; charset=utf-8',
       })
@@ -86,7 +87,7 @@ class WebDavClient implements CloudClient {
   Future<Uint8List> getBytes(String url) async {
     final requestUrl = resolve(url);
     try {
-      final response = await _client.get(requestUrl, headers: _authHeaders).timeout(_getTimeout);
+      final response = await _client.get(requestUrl, headers: requestHeaders).timeout(_getTimeout);
       if (response.statusCode >= 400) {
         throw CloudException('failed to download file', statusCode: response.statusCode);
       }
@@ -108,7 +109,7 @@ class WebDavClient implements CloudClient {
     final requestUrl = resolve(url);
     final request = http.Request('GET', requestUrl)
       ..headers.addAll({
-        ..._authHeaders,
+        ...requestHeaders,
         'Range': 'bytes=0-${maxBytes - 1}',
       });
 

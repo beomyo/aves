@@ -754,13 +754,19 @@ object StorageUtils {
         }
     }
 
-    fun openMetadataRetriever(context: Context, uri: Uri): MediaMetadataRetriever? {
+    fun openMetadataRetriever(context: Context, uri: Uri, httpHeaders: Map<String, String>? = null): MediaMetadataRetriever? {
         val effectiveUri = getOriginalUri(context, uri)
         return try {
             MediaMetadataRetriever().apply {
-                // on Android 12 preview, setting the data source works but yields an internal IOException
-                // (`Input file descriptor already original`), whether we provide the original URI or not
-                setDataSource(context, effectiveUri)
+                // remote resources (WebDAV over http/https) cannot be opened through
+                // the content resolver, and usually need auth headers
+                if (uri.scheme == "http" || uri.scheme == "https") {
+                    setDataSource(uri.toString(), httpHeaders ?: emptyMap())
+                } else {
+                    // on Android 12 preview, setting the data source works but yields an internal IOException
+                    // (`Input file descriptor already original`), whether we provide the original URI or not
+                    setDataSource(context, effectiveUri)
+                }
             }
         } catch (_: Exception) {
             // unsupported format

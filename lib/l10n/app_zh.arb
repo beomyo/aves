@@ -818,6 +818,9 @@
     "cloudLayoutPerFolder": "单独记住每个文件夹的视图",
     "cloudShowFileSizes": "显示文件大小",
     "cloudViewerThumbnails": "图片浏览器缩略图条",
+    "cloudShowVideoThumbnails": "视频缩略图",
+    "cloudShowVideoDuration": "显示视频时长",
+    "cloudShowVideoPlayIcon": "显示播放图标",
     "cloudSortNameAsc": "名称升序（A→Z）",
     "cloudSortNameDesc": "名称降序（Z→A）"
 }
