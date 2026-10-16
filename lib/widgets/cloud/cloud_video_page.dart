@@ -130,12 +130,19 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
   void _createController() {
     _statusSub?.cancel();
     _positionSub?.cancel();
+    // the player opens the media paused; hand it the resume position up front so
+    // mpv seeks while loading (see `MpvVideoController._init`), then start it
+    // once ready
+    final neverResume = settings.videoResumptionMode == VideoResumptionMode.never;
+    final resume = neverResume ? 0 : (settings.cloudVideoPosition(_storageUri) ?? 0);
+    _resumePending = resume > 0;
     final controller = videoControllerFactory.buildController(
       _entry,
       // cloud progress is keyed by URL and handled by this page; the controller
       // handler is disabled because cloud entries have no stable id
       playbackStateHandler: const _NoopPlaybackStateHandler(),
       settings: settings,
+      startMillis: resume,
     );
     _controller = controller;
     _status = PlaybackStatus.idle;
@@ -148,11 +155,6 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
     _positionSub = controller.positionStream.listen((position) {
       if (mounted) _position.value = position;
     });
-    // the player opens the media paused, so wait until it is ready to resume
-    // where we stopped (if anywhere) and start
-    final neverResume = settings.videoResumptionMode == VideoResumptionMode.never;
-    final resume = neverResume ? 0 : (settings.cloudVideoPosition(_storageUri) ?? 0);
-    _resumePending = resume > 0;
     controller.untilReady.then((_) {
       if (!mounted || !identical(_controller, controller)) return;
       unawaited(_resumeAndPlay(controller, resume));
@@ -162,29 +164,17 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
     _scheduleHideControls();
   }
 
-  // mpv cannot seek a network stream before it knows its duration, so a seek
-  // issued right after the first frame can be dropped and playback starts from
-  // 0. On top of that, attaching the video surface makes media_kit_video seek
-  // to the position it knows (`android_video_controller/real.dart` `widListener`),
-  // which can jump back to the start right after we resumed. So: wait for the
-  // duration, seek, then keep the position on target while the surface attaches.
+  // The resume position is handed to the player as `start` when the media is
+  // opened, so mpv seeks while loading and the first frame is already at the
+  // resume point (no post-ready seek, no wait for the duration). Attaching the
+  // video surface still makes media_kit_video seek to the position it knows
+  // (`android_video_controller/real.dart` `widListener`), which jumps back to
+  // the start if that position is stale, so keep the position on target while
+  // the surface attaches.
   Future<void> _resumeAndPlay(AvesVideoController controller, int resume) async {
-    var watchUntil = DateTime.now();
-    if (resume > 0) {
-      final deadline = DateTime.now().add(const Duration(seconds: 2));
-      while (controller.duration <= 0 && DateTime.now().isBefore(deadline)) {
-        await Future.delayed(const Duration(milliseconds: 100));
-        if (!mounted || !identical(_controller, controller)) return;
-      }
-      final duration = controller.duration;
-      debugPrint('cloud video resume: requested=$resume duration=$duration');
-      if (duration <= 0 || resume < duration - 2000) {
-        await controller.seekTo(resume);
-        watchUntil = DateTime.now().add(_resumeHoldDuration);
-      }
-    }
-    if (mounted && identical(_controller, controller)) unawaited(controller.play());
+    unawaited(controller.play());
 
+    final watchUntil = resume > 0 ? DateTime.now().add(_resumeHoldDuration) : DateTime.now();
     var reseeks = 0;
     while (DateTime.now().isBefore(watchUntil)) {
       await Future.delayed(const Duration(milliseconds: 250));
@@ -194,6 +184,12 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
       final position = controller.currentPosition;
       // the surface attach resets playback to the very start; only counteract that
       if (resume > 10000 && position < 5000) {
+        // mpv cannot seek a network stream before it knows its duration
+        final deadline = DateTime.now().add(const Duration(seconds: 2));
+        while (controller.duration <= 0 && DateTime.now().isBefore(deadline)) {
+          await Future.delayed(const Duration(milliseconds: 100));
+          if (!mounted || !identical(_controller, controller)) return;
+        }
         debugPrint('cloud video resume: position dropped to $position, re-seeking $resume');
         reseeks++;
         await controller.seekTo(resume);

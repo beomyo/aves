@@ -18,6 +18,8 @@ class MpvVideoController(
   super.entry, {
   required super.playbackStateHandler,
   required super.settings,
+  // position to seek to when the media is first opened (resume)
+  final int startMillis = 0,
 }) extends AvesVideoController {
   late Player _mkPlayer;
   late PlaybackStatus _status;
@@ -198,8 +200,9 @@ class MpvVideoController(
 
   Future<void> _applyLoop() => enableLoop(settings.videoLoopMode.shouldLoop(entry));
 
-  Future<void> _init({int startMillis = 0}) async {
+  Future<void> _init({int? resumeMillis}) async {
     final playing = _mkPlayer.state.playing;
+    final start = resumeMillis ?? startMillis;
 
     // Audio quality is better with `audiotrack` than `opensles` (the default).
     // Calling `setAudioDevice` does not seem to work.
@@ -237,18 +240,33 @@ class MpvVideoController(
         await platform.setProperty('cache-secs', '10');
         await platform.setProperty('demuxer-readahead-secs', '2');
         await platform.setProperty('demuxer-max-bytes', '${64 * 1024 * 1024}');
+        // `libavformat` probes the container before the first frame is decoded;
+        // the container headers are enough for the formats we stream, so bound
+        // the probe (defaults are much larger and mostly waste time on network)
+        await platform.setProperty('demuxer-lavf-analyzeduration', '1');
+        await platform.setProperty('demuxer-lavf-probesize', '${1024 * 1024}');
         // read the stream in larger chunks to cut down on round trips
-        await platform.setProperty('stream-buffer-size', '${1024 * 1024}');
+        await platform.setProperty('stream-buffer-size', '${2 * 1024 * 1024}');
         // report network stalls sooner than mpv's default instead of blocking
         await platform.setProperty('network-timeout', '10');
+        // recover from transient drops instead of restarting the stream
+        await platform.setProperty('stream-lavf-o', 'reconnect=1,reconnect_on_network_error=1');
       }
     }
 
-    await _mkPlayer.open(Media(mediaUri, httpHeaders: httpHeaders.isEmpty ? null : httpHeaders), play: playing);
+    // seek while loading (mpv's `start` option) instead of after the first
+    // frame: a post-ready seek on a network stream is slow (mpv must know the
+    // duration first) and gets undone by the surface attach re-seek in
+    // `media_kit_video`
+    await _mkPlayer.open(
+      Media(
+        mediaUri,
+        httpHeaders: httpHeaders.isEmpty ? null : httpHeaders,
+        start: start > 0 ? Duration(milliseconds: start) : null,
+      ),
+      play: playing,
+    );
     await _mkPlayer.setSubtitleTrack(SubtitleTrack.no());
-    if (startMillis > 0) {
-      await seekTo(startMillis);
-    }
 
     _fetchTracks();
     _statusStreamController.add(_mkPlayer.state.playing ? .playing : .paused);
@@ -298,7 +316,7 @@ class MpvVideoController(
   }
 
   @override
-  void onVisualChanged() => _init(startMillis: currentPosition);
+  void onVisualChanged() => _init(resumeMillis: currentPosition);
 
   void _onPlayerLog(PlayerLog log) {
     debugPrint('libmpv log: $log');

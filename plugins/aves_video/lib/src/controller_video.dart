@@ -14,6 +14,7 @@ abstract class AvesVideoControllerFactory {
     AvesEntryBase entry, {
     required PlaybackStateHandler playbackStateHandler,
     required VideoSettings settings,
+    int startMillis = 0,
   });
 }
 
