@@ -744,7 +744,6 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
 
   Widget _buildListSliver(BuildContext context, List<AvesEntry> entries, bool showNames, bool showSizes) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    final showVideoThumbnails = context.select<Settings, bool>((s) => s.cloudVideoThumbnails);
     final showVideoDuration = context.select<Settings, bool>((s) => s.cloudVideoDurationVisible);
     final showVideoPlayIcon = context.select<Settings, bool>((s) => s.cloudVideoPlayIcon);
     return SliverList.builder(
@@ -760,22 +759,20 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
           leading: SizedBox(
             width: 56,
             height: 56,
-            child: entry.isVideo && !showVideoThumbnails
-                ? const _VideoPlaceholder()
-                : ThumbnailImage(
-                    entry: entry,
-                    extent: 56,
-                    devicePixelRatio: dpr,
-                    fit: BoxFit.cover,
-                    cancellableNotifier: _isScrolling,
-                    errorPlaceholder: entry.isVideo ? const _VideoPlaceholder() : null,
-                    onImageInfo: entry.isVideo
-                        ? (info) {
-                            final image = info.image;
-                            if (image.width > 0 && image.height > 0) _onTileAspect(entry.uri, image.width / image.height);
-                          }
-                        : null,
-                  ),
+            child: ThumbnailImage(
+              entry: entry,
+              extent: 56,
+              devicePixelRatio: dpr,
+              fit: BoxFit.cover,
+              cancellableNotifier: _isScrolling,
+              errorPlaceholder: entry.isVideo ? const _VideoPlaceholder() : null,
+              onImageInfo: entry.isVideo
+                  ? (info) {
+                      final image = info.image;
+                      if (image.width > 0 && image.height > 0) _onTileAspect(entry.uri, image.width / image.height);
+                    }
+                  : null,
+            ),
           ),
           title: Text(
             entry.sourceTitle ?? entry.bestTitle ?? '',
@@ -1014,7 +1011,6 @@ class _CloudTile extends StatelessWidget {
   Widget build(BuildContext context) {
     // options are selected here (rather than read from `settings` directly) so
     // that toggling them applies immediately, even from the options sheet
-    final showVideoThumbnails = context.select<Settings, bool>((s) => s.cloudVideoThumbnails);
     final showVideoDuration = context.select<Settings, bool>((s) => s.cloudVideoDurationVisible);
     final showVideoPlayIcon = context.select<Settings, bool>((s) => s.cloudVideoPlayIcon);
     Widget content;
@@ -1024,19 +1020,21 @@ class _CloudTile extends StatelessWidget {
         children: [
           // stands in until the frame arrives, and remains when extraction fails
           const _VideoPlaceholder(),
-          if (showVideoThumbnails)
-            ThumbnailImage(
-              entry: entry,
-              extent: extent,
-              devicePixelRatio: devicePixelRatio,
-              fit: BoxFit.cover,
-              isMosaic: isMosaic,
-              cancellableNotifier: cancellableNotifier,
-              heroTag: null,
-              showLoadingBackground: false,
-              errorPlaceholder: const SizedBox.shrink(),
-              onImageInfo: _onVideoInfo,
-            ),
+          // always requested: the thumbnail option only disables automatic
+          // extraction, and a frame already known (captured while watching, or
+          // cached) must still be shown
+          ThumbnailImage(
+            entry: entry,
+            extent: extent,
+            devicePixelRatio: devicePixelRatio,
+            fit: BoxFit.cover,
+            isMosaic: isMosaic,
+            cancellableNotifier: cancellableNotifier,
+            heroTag: null,
+            showLoadingBackground: false,
+            errorPlaceholder: const SizedBox.shrink(),
+            onImageInfo: _onVideoInfo,
+          ),
           _VideoOverlay(
             progress: progress,
             durationText: _cloudVideoDurationText(entry, visible: showVideoDuration),

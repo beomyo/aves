@@ -159,6 +159,12 @@ Future<void> evictCloudThumbnail(String uri) async {
   await cloudDiskCache.remove(uri);
 }
 
+// stores a frame captured while the user was watching the video, so the grid can
+// show a thumbnail without asking the server to extract one
+Future<void> saveCloudVideoThumbnail(String uri, Uint8List bytes) async {
+  await cloudDiskCache.put('${CloudAwareMediaFetchService._videoThumbnailCachePrefix}$uri', bytes);
+}
+
 // Decorates the platform media fetch service so that remote URIs
 // (WebDAV / SMB entries) are served from the network while every other URI
 // keeps using the platform implementation unchanged.
@@ -292,6 +298,13 @@ class CloudAwareMediaFetchService implements MediaFetchService {
         // drop a corrupt entry so the next attempt extracts a fresh frame
         unawaited(cloudDiskCache.remove(cacheKey));
       }
+    }
+
+    // automatic extraction is the expensive, server-hitting part, so it can be
+    // turned off; a frame already known (captured while watching, or cached
+    // from an earlier extraction) is still served
+    if (!settings.cloudVideoThumbnails) {
+      throw const CloudException('automatic video thumbnails are disabled');
     }
 
     final cooldownUntil = _videoThumbCooldown[uri];

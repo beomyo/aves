@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:aves/model/entry/cache.dart';
 import 'package:aves/model/entry/entry.dart';
 import 'package:aves/model/entry/origins.dart';
 import 'package:aves/model/settings/settings.dart';
 import 'package:aves/model/source/cloud/cloud_resource.dart';
 import 'package:aves/services/common/cloud_registry.dart';
 import 'package:aves/services/common/services.dart';
+import 'package:aves/services/media/cloud_fetch_service.dart';
 import 'package:aves/services/media/cloud_mime.dart';
 import 'package:aves/theme/format.dart';
 import 'package:aves/theme/icons.dart';
@@ -75,6 +77,8 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
   late String _storageUri;
   // while a resume seek is in flight, do not save the (still near-start) position
   bool _resumePending = false;
+  // guards against a second back press while the exit frame is being captured
+  bool _leaving = false;
 
   @override
   void initState() {
@@ -96,10 +100,38 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
     _positionSub?.cancel();
     _position.dispose();
     _setKeepScreenOn(false);
-    _controller?.dispose();
+    // the player is disposed asynchronously, so a capture in flight can finish
+    unawaited(_disposeController());
     // restore the default (unspecified) orientation
     SystemChrome.setPreferredOrientations(const []);
     super.dispose();
+  }
+
+  Future<void> _disposeController() async {
+    final controller = _controller;
+    _controller = null;
+    await controller?.dispose();
+  }
+
+  // A frame seen during playback is much cheaper than asking the server to
+  // extract one: the video is already being streamed, so the last frame becomes
+  // the entry thumbnail (and its duration) for free.
+  Future<void> _persistPlaybackSnapshot(AvesVideoController? controller, String storageUri) async {
+    if (controller == null) return;
+    final duration = controller.duration;
+    if (duration <= 0) return;
+    // record the duration even when the user did not watch past the start
+    settings.setCloudVideoDuration(storageUri, duration);
+    if (controller.currentPosition <= 0) return;
+    try {
+      final bytes = await controller.captureFrame();
+      if (bytes == null || bytes.isEmpty) return;
+      await saveCloudVideoThumbnail(storageUri, bytes);
+      // drop the tile's in-memory thumbnail so it picks the new frame up
+      EntryCache.evict(storageUri);
+    } catch (_) {
+      // best effort: the grid keeps whatever it had
+    }
   }
 
   void _onTransformChanged() {
@@ -209,6 +241,8 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
     if (storageUri == _storageUri) return;
 
     _saveProgress();
+    // turn the last watched frame into the entry thumbnail before the player goes away
+    await _persistPlaybackSnapshot(_controller, _storageUri);
     _resumePending = false;
     _progressTimer?.cancel();
     _hideTimer?.cancel();
@@ -494,7 +528,7 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
     final hasError = _status == PlaybackStatus.error;
     final ready = controller?.isReady ?? false;
 
-    return AvesScaffold(
+    final scaffold = AvesScaffold(
       backgroundColor: Colors.black,
       body: Stack(
         fit: StackFit.expand,
@@ -558,6 +592,21 @@ class _CloudVideoPageState extends State<CloudVideoPage> {
           if (controller != null) _buildBottomBar(context, controller),
         ],
       ),
+    );
+
+    // the player must stay alive while the exit frame is captured, so the pop
+    // waits for it (bounded, so a stuck player cannot trap the user)
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop || _leaving) return;
+        _leaving = true;
+        _saveProgress();
+        await _persistPlaybackSnapshot(_controller, _storageUri).timeout(const Duration(seconds: 2), onTimeout: () {});
+        if (!mounted) return;
+        Navigator.of(context).pop(result);
+      },
+      child: scaffold,
     );
   }
 

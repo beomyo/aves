@@ -25,6 +25,16 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.7"></a>[v1.19.7] - 2026-10-17
+
+### Added
+
+- Cloud: leaving the player saves the frame you stopped on as the video's thumbnail, together with its duration. It costs no extra request, since the video is already being streamed
+
+### Changed
+
+- Cloud: the video thumbnail option now only disables **automatic** extraction. A frame captured while watching, or one already cached, is still displayed, so the option can stay off to spare the server while the videos you actually watch still get thumbnails
+
 ## <a id="v1.19.6"></a>[v1.19.6] - 2026-10-17
 
 ### Fixed

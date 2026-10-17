@@ -177,17 +177,18 @@ class CloudViewOptionsSheet extends StatelessWidget {
                       onChanged: (v) => settings.cloudVideoThumbnailPercent = v,
                     ),
                   ),
-                  ListTile(
-                    leading: const Icon(Icons.refresh),
-                    title: Text(l10n.cloudRebuildThumbnails),
-                    onTap: onRebuildThumbnails == null
-                        ? null
-                        : () {
-                            Navigator.pop(context);
-                            onRebuildThumbnails!();
-                          },
-                  ),
                 ],
+                // always available: frames captured during playback are affected too
+                ListTile(
+                  leading: const Icon(Icons.refresh),
+                  title: Text(l10n.cloudRebuildThumbnails),
+                  onTap: onRebuildThumbnails == null
+                      ? null
+                      : () {
+                          Navigator.pop(context);
+                          onRebuildThumbnails!();
+                        },
+                ),
                 const Divider(height: 24),
                 SwitchListTile(
                   title: Text(l10n.cloudViewerThumbnails),
