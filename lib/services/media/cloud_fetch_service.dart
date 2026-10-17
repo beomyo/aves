@@ -17,6 +17,7 @@ import 'package:aves_report/aves_report.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
+import 'package:synchronized/synchronized.dart';
 
 bool isCloudUri(String uri) => uri.startsWith('http://') || uri.startsWith('https://') || uri.startsWith('smb://');
 
@@ -162,16 +163,23 @@ Future<void> evictCloudThumbnail(String uri) async {
 // (WebDAV / SMB entries) are served from the network while every other URI
 // keeps using the platform implementation unchanged.
 class CloudAwareMediaFetchService implements MediaFetchService {
-  // remote video frames are extracted on demand and can be slow, so bound them
-  // and back off per file after a failure so scrolling cannot retry the same
-  // dead file over and over
-  static const _videoThumbnailTimeout = Duration(seconds: 10);
+  // remote servers can rate limit aggressive clients (AList/OpenList expose such
+  // a limit), and one frame extraction costs several round trips, so the budget
+  // is generous; extractions are also serialized below so the limit is shared
+  // rather than multiplied
+  static const _videoThumbnailTimeout = Duration(seconds: 45);
   static const _videoThumbnailCooldown = Duration(seconds: 60);
+  // a timeout is usually a slow/rate limited server rather than a file that
+  // cannot be thumbnailed, so retry it much sooner
+  static const _videoThumbnailTimeoutCooldown = Duration(seconds: 20);
   // extracted frames live in `cloudDiskCache`, so they survive a restart
   static const _videoThumbnailCachePrefix = 'video-thumb:';
 
   final MediaFetchService _delegate;
   final Map<String, DateTime> _videoThumbCooldown = {};
+  // one extraction at a time: when the server rate limits requests, running
+  // several in parallel only multiplies each one's latency
+  final _videoThumbnailLock = Lock();
 
   new(this._delegate);
 
@@ -291,26 +299,33 @@ class CloudAwareMediaFetchService implements MediaFetchService {
       throw const CloudException('video thumbnail temporarily unavailable');
     }
 
+    final started = DateTime.now();
     try {
       final source = await cloudRegistry.playbackSource(uri);
       final headers = source.headers.isEmpty ? null : source.headers;
       final previewFraction = settings.cloudVideoThumbnailPercent / 100;
-      final bytes = await _delegate
-          .getThumbnailBytes(
-            decoded: decoded,
-            request: request,
-            uriOverride: source.url,
-            httpHeaders: headers,
-            previewFraction: previewFraction,
-            taskKey: taskKey,
-            priority: priority ?? ServiceCallPriority.getVideoThumbnail,
-          )
-          .timeout(_videoThumbnailTimeout);
+      // serialized: see `_videoThumbnailLock`. The budget covers the extraction
+      // itself, not the wait for the previous one, so a queue of slow tiles is
+      // not reported as a failure.
+      final bytes = await _videoThumbnailLock.synchronized(
+        () => _delegate
+            .getThumbnailBytes(
+              decoded: decoded,
+              request: request,
+              uriOverride: source.url,
+              httpHeaders: headers,
+              previewFraction: previewFraction,
+              taskKey: taskKey,
+              priority: priority ?? ServiceCallPriority.getVideoThumbnail,
+            )
+            .timeout(_videoThumbnailTimeout),
+      );
       if (bytes.isNotEmpty) {
         final codec = await CloudImageLoader.decodeBounded(bytes, decoder, maxDim);
         // only cache a frame that decoded, so a bad entry cannot wedge the tile
         unawaited(cloudDiskCache.put(cacheKey, bytes));
         unawaited(_recordVideoDuration(uri, source.url));
+        _logVideoThumbnail(uri, started, 'extracted', extra: 'bytes=${bytes.length}');
         return codec;
       }
 
@@ -332,16 +347,24 @@ class CloudAwareMediaFetchService implements MediaFetchService {
       if (codec == null) {
         throw const CloudException('failed to extract a video frame');
       }
+      _logVideoThumbnail(uri, started, 'fallback');
       return codec;
     } catch (error) {
       // a task paused while the tile scrolled away never completes, so the
       // timeout above fires without the file being at fault: do not back it off
-      final pausedDuringWait = error is TimeoutException && taskKey != null && servicePolicy.isPaused(taskKey);
+      final isTimeout = error is TimeoutException;
+      final pausedDuringWait = isTimeout && taskKey != null && servicePolicy.isPaused(taskKey);
       if (!pausedDuringWait) {
-        _videoThumbCooldown[uri] = DateTime.now().add(_videoThumbnailCooldown);
+        _videoThumbCooldown[uri] = DateTime.now().add(isTimeout ? _videoThumbnailTimeoutCooldown : _videoThumbnailCooldown);
       }
+      _logVideoThumbnail(uri, started, 'failed', extra: 'reason=${error.runtimeType} timeout=$isTimeout paused=$pausedDuringWait message=$error');
       rethrow;
     }
+  }
+
+  static void _logVideoThumbnail(String uri, DateTime started, String outcome, {String? extra}) {
+    final elapsedMs = DateTime.now().difference(started).inMilliseconds;
+    debugPrint('[cloud-video-thumb] $outcome uri=$uri elapsedMs=$elapsedMs${extra == null ? '' : ' $extra'}');
   }
 
   // the platform probes the duration while extracting the frame; persist it so

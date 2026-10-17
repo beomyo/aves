@@ -1022,6 +1022,8 @@ class _CloudTile extends StatelessWidget {
       content = Stack(
         fit: StackFit.expand,
         children: [
+          // stands in until the frame arrives, and remains when extraction fails
+          const _VideoPlaceholder(),
           if (showVideoThumbnails)
             ThumbnailImage(
               entry: entry,
@@ -1031,11 +1033,10 @@ class _CloudTile extends StatelessWidget {
               isMosaic: isMosaic,
               cancellableNotifier: cancellableNotifier,
               heroTag: null,
-              errorPlaceholder: const _VideoPlaceholder(),
+              showLoadingBackground: false,
+              errorPlaceholder: const SizedBox.shrink(),
               onImageInfo: _onVideoInfo,
-            )
-          else
-            const _VideoPlaceholder(),
+            ),
           _VideoOverlay(
             progress: progress,
             durationText: _cloudVideoDurationText(entry, visible: showVideoDuration),

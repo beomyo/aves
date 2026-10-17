@@ -25,6 +25,17 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.6"></a>[v1.19.6] - 2026-10-17
+
+### Fixed
+
+- Cloud: video thumbnails failing on servers that rate limit requests. Frame extraction is now serialized (parallel extractions only multiplied each one's latency) and gets a much larger budget, and a timeout backs the file off for 20s instead of a minute
+- Cloud: the video tile keeps its dark placeholder while the frame is extracted, instead of flashing a light box
+
+### Added
+
+- Cloud: failed video thumbnail extractions log their reason and duration (`cloud-video-thumb`) to help diagnose slow servers
+
 ## <a id="v1.19.5"></a>[v1.19.5] - 2026-10-16
 
 ### Added

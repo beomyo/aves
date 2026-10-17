@@ -768,9 +768,9 @@ object StorageUtils {
                     setDataSource(context, effectiveUri)
                 }
             }
-        } catch (_: Exception) {
-            // unsupported format
-            Log.w(LOG_TAG, "failed to initialize MediaMetadataRetriever for uri=$uri effectiveUri=$effectiveUri")
+        } catch (e: Exception) {
+            // unsupported format, unreachable host, rejected auth, ...
+            Log.w(LOG_TAG, "failed to initialize MediaMetadataRetriever for uri=$uri effectiveUri=$effectiveUri: ${e.message}")
             null
         }
     }
