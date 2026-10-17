@@ -25,6 +25,16 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.8"></a>[v1.19.8] - 2026-10-17
+
+### Added
+
+- Cloud: setting for the number of thumbnails extracted at once (1 to 4, default 1). Servers that rate limit requests need a low value, since parallel requests only multiply each one's latency
+
+### Changed
+
+- Cloud: leaving a folder stops generating its thumbnails after 3 seconds, instead of continuing in the background for a folder that is no longer on screen. Extractions already in flight are allowed to finish, since the platform call cannot be aborted
+
 ## <a id="v1.19.7"></a>[v1.19.7] - 2026-10-17
 
 ### Added

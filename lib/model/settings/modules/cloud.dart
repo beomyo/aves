@@ -126,6 +126,16 @@ mixin CloudSettings on SettingsAccess {
   static const double minVideoThumbnailPercent = .5;
   static const double maxVideoThumbnailPercent = 20;
 
+  // how many remote thumbnails may be extracted at once. Servers that rate
+  // limit requests need a low value: parallel requests only multiply latency
+  int get cloudThumbnailConcurrency => (getInt(SettingKeys.cloudThumbnailConcurrencyKey) ?? defaultThumbnailConcurrency).clamp(minThumbnailConcurrency, maxThumbnailConcurrency);
+
+  set cloudThumbnailConcurrency(int newValue) => set(SettingKeys.cloudThumbnailConcurrencyKey, newValue.clamp(minThumbnailConcurrency, maxThumbnailConcurrency));
+
+  static const int defaultThumbnailConcurrency = 1;
+  static const int minThumbnailConcurrency = 1;
+  static const int maxThumbnailConcurrency = 4;
+
   bool get cloudVideoDurationVisible => getBool(SettingKeys.cloudVideoDurationKey) ?? true;
 
   set cloudVideoDurationVisible(bool newValue) => set(SettingKeys.cloudVideoDurationKey, newValue);

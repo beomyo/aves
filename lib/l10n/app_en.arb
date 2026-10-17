@@ -1219,6 +1219,7 @@
   "cloudShowVideoDuration": "Show video duration",
   "cloudShowVideoPlayIcon": "Show play icon",
   "cloudVideoThumbnailPosition": "Frame position",
+  "cloudThumbnailConcurrency": "Concurrent extractions",
   "cloudRebuildThumbnails": "Rebuild thumbnails",
   "cloudSortNameAsc": "Name (A to Z)",
   "cloudSortNameDesc": "Name (Z to A)"

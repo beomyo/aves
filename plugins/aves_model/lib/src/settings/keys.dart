@@ -185,6 +185,7 @@ class SettingKeys {
   static const cloudVideoPositionsKey = 'cloud_video_positions';
   static const cloudVideoThumbnailsKey = 'cloud_video_thumbnails';
   static const cloudVideoThumbnailPercentKey = 'cloud_video_thumbnail_percent';
+  static const cloudThumbnailConcurrencyKey = 'cloud_thumbnail_concurrency';
   static const cloudVideoDurationKey = 'cloud_video_duration_visible';
   static const cloudVideoPlayIconKey = 'cloud_video_play_icon';
   static const cloudLastServerIdKey = 'cloud_last_server_id';

@@ -86,6 +86,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   final Map<String, double> _aspects = {};
   Timer? _aspectFlushTimer;
   int _probeGeneration = 0;
+  Timer? _abandonTimer;
 
   String get _baseUrl => widget.server.url.endsWith('/') ? widget.server.url : '${widget.server.url}/';
 
@@ -120,6 +121,8 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   @override
   void dispose() {
     _probeGeneration++;
+    // the page is going away: stop generating the thumbnails of this folder
+    _abandonThumbnailsSoon(_media.value.map((e) => e.uri));
     _settingsSub?.cancel();
     _scrollTimer?.cancel();
     _aspectFlushTimer?.cancel();
@@ -229,6 +232,8 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
 
   void _navigateTo(String url) {
     if (url == _currentUrl) return;
+    // stop generating the thumbnails of the folder being left
+    _abandonThumbnailsSoon(_media.value.map((e) => e.uri));
     _rememberScrollPosition();
     settings.markCloudVisited(url);
     setState(() {
@@ -357,6 +362,18 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     // aspect ratios were derived from the discarded images
     _aspects.clear();
     if (mounted) setState(() {});
+  }
+
+  // stops extracting the thumbnails of a folder that is no longer on screen,
+  // after a short grace period so an accidental tap does not lose progress
+  void _abandonThumbnailsSoon(Iterable<String> uris) {
+    final list = uris.toList();
+    if (list.isEmpty) return;
+    _abandonTimer?.cancel();
+    _abandonTimer = Timer(const Duration(seconds: 3), () {
+      _abandonTimer = null;
+      abandonCloudVideoThumbnails(list);
+    });
   }
 
   double _aspectOf(AvesEntry entry) => (entry.isVideo ? (_aspects[entry.uri] ?? 16 / 9) : (_aspects[entry.uri] ?? 1.0)).clamp(0.35, 2.6);

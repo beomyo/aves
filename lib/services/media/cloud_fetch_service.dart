@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -17,7 +18,6 @@ import 'package:aves_report/aves_report.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
-import 'package:synchronized/synchronized.dart';
 
 bool isCloudUri(String uri) => uri.startsWith('http://') || uri.startsWith('https://') || uri.startsWith('smb://');
 
@@ -165,6 +165,20 @@ Future<void> saveCloudVideoThumbnail(String uri, Uint8List bytes) async {
   await cloudDiskCache.put('${CloudAwareMediaFetchService._videoThumbnailCachePrefix}$uri', bytes);
 }
 
+// drops the queued thumbnail extractions of entries the user has left, so the
+// app stops generating for a folder that is no longer on screen
+void abandonCloudVideoThumbnails(Iterable<String> uris) {
+  final service = mediaFetchService;
+  if (service is CloudAwareMediaFetchService) {
+    service.abandonVideoThumbnails(uris);
+  }
+}
+
+// thrown when the user left the folder an extraction belongs to
+class _VideoThumbnailAbandoned implements Exception {
+  const new();
+}
+
 // Decorates the platform media fetch service so that remote URIs
 // (WebDAV / SMB entries) are served from the network while every other URI
 // keeps using the platform implementation unchanged.
@@ -183,9 +197,16 @@ class CloudAwareMediaFetchService implements MediaFetchService {
 
   final MediaFetchService _delegate;
   final Map<String, DateTime> _videoThumbCooldown = {};
-  // one extraction at a time: when the server rate limits requests, running
-  // several in parallel only multiplies each one's latency
-  final _videoThumbnailLock = Lock();
+
+  // how many extractions may hit the server at once; deliberately low by
+  // default, because parallel requests only multiply latency on a rate limited
+  // server. The limit is read on every acquire so the setting applies at once.
+  int _videoThumbnailRunning = 0;
+  final Queue<Completer<void>> _videoThumbnailWaiters = Queue();
+
+  // generation per entry, bumped when the user leaves the folder it belongs to,
+  // so queued extractions of that folder are dropped
+  final Map<String, int> _abandonedVideoGeneration = {};
 
   new(this._delegate);
 
@@ -279,6 +300,47 @@ class CloudAwareMediaFetchService implements MediaFetchService {
   // playable URL and the auth headers of the owning server. The extracted frame
   // is cached on disk so that a restart does not fetch it again, and libmpv is
   // used as a fallback for containers the platform cannot decode.
+
+  // abandons the queued extractions of entries the user has left. Nothing is
+  // cancelled mid-flight (a platform call cannot be aborted), but the rest of
+  // the queue is dropped instead of hitting the server.
+  void abandonVideoThumbnails(Iterable<String> uris) {
+    for (final uri in uris) {
+      _abandonedVideoGeneration[uri] = (_abandonedVideoGeneration[uri] ?? 0) + 1;
+    }
+    if (_abandonedVideoGeneration.length > 4000) {
+      _abandonedVideoGeneration.clear();
+    }
+  }
+
+  int _generationOf(String uri) => _abandonedVideoGeneration[uri] ?? 0;
+
+  void _throwIfAbandoned(int generation, String uri) {
+    if (generation != _generationOf(uri)) {
+      throw const _VideoThumbnailAbandoned();
+    }
+  }
+
+  Future<void> _acquireVideoThumbnailSlot() async {
+    if (_videoThumbnailRunning < settings.cloudThumbnailConcurrency) {
+      _videoThumbnailRunning++;
+      return;
+    }
+    final completer = Completer<void>();
+    _videoThumbnailWaiters.add(completer);
+    // the releaser increments the counter on our behalf
+    await completer.future;
+  }
+
+  void _releaseVideoThumbnailSlot() {
+    _videoThumbnailRunning--;
+    final limit = settings.cloudThumbnailConcurrency;
+    while (_videoThumbnailWaiters.isNotEmpty && _videoThumbnailRunning < limit) {
+      _videoThumbnailRunning++;
+      _videoThumbnailWaiters.removeFirst().complete();
+    }
+  }
+
   Future<ui.Codec> _getCloudVideoThumbnail({
     required bool decoded,
     required ThumbnailProviderKey request,
@@ -312,16 +374,19 @@ class CloudAwareMediaFetchService implements MediaFetchService {
       throw const CloudException('video thumbnail temporarily unavailable');
     }
 
+    final generation = _generationOf(uri);
     final started = DateTime.now();
     try {
       final source = await cloudRegistry.playbackSource(uri);
       final headers = source.headers.isEmpty ? null : source.headers;
       final previewFraction = settings.cloudVideoThumbnailPercent / 100;
-      // serialized: see `_videoThumbnailLock`. The budget covers the extraction
-      // itself, not the wait for the previous one, so a queue of slow tiles is
-      // not reported as a failure.
-      final bytes = await _videoThumbnailLock.synchronized(
-        () => _delegate
+      // the budget covers the extraction itself, not the wait for a free slot, so
+      // a queue of slow tiles is not reported as a failure
+      late final Uint8List bytes;
+      await _acquireVideoThumbnailSlot();
+      try {
+        _throwIfAbandoned(generation, uri);
+        bytes = await _delegate
             .getThumbnailBytes(
               decoded: decoded,
               request: request,
@@ -331,8 +396,10 @@ class CloudAwareMediaFetchService implements MediaFetchService {
               taskKey: taskKey,
               priority: priority ?? ServiceCallPriority.getVideoThumbnail,
             )
-            .timeout(_videoThumbnailTimeout),
-      );
+            .timeout(_videoThumbnailTimeout);
+      } finally {
+        _releaseVideoThumbnailSlot();
+      }
       if (bytes.isNotEmpty) {
         final codec = await CloudImageLoader.decodeBounded(bytes, decoder, maxDim);
         // only cache a frame that decoded, so a bad entry cannot wedge the tile
@@ -343,6 +410,7 @@ class CloudAwareMediaFetchService implements MediaFetchService {
       }
 
       // the platform could not extract a frame from this container: let libmpv try
+      _throwIfAbandoned(generation, uri);
       final descriptor = await videoMetadataFetcher
           .getThumbnailDescriptor(
             uri: source.url,
@@ -363,6 +431,11 @@ class CloudAwareMediaFetchService implements MediaFetchService {
       _logVideoThumbnail(uri, started, 'fallback');
       return codec;
     } catch (error) {
+      if (error is _VideoThumbnailAbandoned) {
+        // the folder was left before this extraction started: not its fault
+        _logVideoThumbnail(uri, started, 'abandoned');
+        rethrow;
+      }
       // a task paused while the tile scrolled away never completes, so the
       // timeout above fires without the file being at fault: do not back it off
       final isTimeout = error is TimeoutException;

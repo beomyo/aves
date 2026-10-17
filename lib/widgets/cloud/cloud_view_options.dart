@@ -77,6 +77,7 @@ class CloudViewOptionsSheet extends StatelessWidget {
         final showSizes = settings.cloudShowSizes;
         final videoThumbnails = settings.cloudVideoThumbnails;
         final videoThumbnailPercent = settings.cloudVideoThumbnailPercent;
+        final thumbnailConcurrency = settings.cloudThumbnailConcurrency;
         final videoDuration = settings.cloudVideoDurationVisible;
         final videoPlayIcon = settings.cloudVideoPlayIcon;
         final viewerThumbnails = settings.cloudViewerThumbnails;
@@ -175,6 +176,18 @@ class CloudViewOptionsSheet extends StatelessWidget {
                       divisions: ((CloudSettings.maxVideoThumbnailPercent - CloudSettings.minVideoThumbnailPercent) / .5).round(),
                       label: '${videoThumbnailPercent.toStringAsFixed(1)}%',
                       onChanged: (v) => settings.cloudVideoThumbnailPercent = v,
+                    ),
+                  ),
+                  _sectionTitle(context, '${l10n.cloudThumbnailConcurrency}  $thumbnailConcurrency'),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Slider(
+                      value: thumbnailConcurrency.toDouble(),
+                      min: CloudSettings.minThumbnailConcurrency.toDouble(),
+                      max: CloudSettings.maxThumbnailConcurrency.toDouble(),
+                      divisions: CloudSettings.maxThumbnailConcurrency - CloudSettings.minThumbnailConcurrency,
+                      label: '$thumbnailConcurrency',
+                      onChanged: (v) => settings.cloudThumbnailConcurrency = v.round(),
                     ),
                   ),
                 ],
