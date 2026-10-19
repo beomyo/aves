@@ -25,6 +25,30 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.9"></a>[v1.19.9] - 2026-10-19
+
+### Added
+
+- Cloud browser: progress under each folder icon. An image folder shows how many of its thumbnails have been loaded (e.g. `23/99`), a folder of folders shows how many subfolders have been opened (e.g. `3/12`); one level deep
+- Cloud browser: export and import the viewing progress as JSON, so reinstalling the app does not lose it
+- Cloud browser: long-press an image, a video or a folder to delete it from the server, behind a confirmation. Deleting a folder also deletes its contents
+- Cloud browser: in mosaic, pulling past the bottom by about a third of the screen opens the next folder in the current sort, with a progress hint
+- Cloud viewer: double-tap to zoom
+- Cloud viewer: the cached low-resolution thumbnail stays visible until the full image arrives, instead of a black page and a spinner
+- Cloud: a spinner on video tiles whose frame is being extracted
+
+### Changed
+
+- Cloud browser: no gaps between grid and mosaic tiles, images now touch edge to edge
+- Cloud browser: going back keeps the deeper path in the address bar. Any segment can be tapped to return, and revisiting a folder reuses its cached listing rather than fetching it again
+- Cloud browser: only a new path is fetched; pull-to-refresh keeps the current tiles in place
+- Cloud browser: mosaic thumbnails are built a screen and a half ahead, so scrolling waits less
+- Cloud viewer: paging needs a longer deliberate drag, and a second finger blocks paging immediately, so a pinch is no longer read as a horizontal swipe
+
+### Fixed
+
+- Cloud: pull-to-refresh no longer forces video thumbnails to be extracted again
+
 ## <a id="v1.19.8"></a>[v1.19.8] - 2026-10-17
 
 ### Added

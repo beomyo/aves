@@ -1221,6 +1221,41 @@
   "cloudVideoThumbnailPosition": "Frame position",
   "cloudThumbnailConcurrency": "Concurrent extractions",
   "cloudRebuildThumbnails": "Rebuild thumbnails",
+  "cloudNextFolder": "Next folder: {name}",
+  "@cloudNextFolder": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "cloudExportProgress": "Export viewing progress",
+  "cloudImportProgress": "Import viewing progress",
+  "cloudDeleteFileConfirmation": "Delete \"{name}\"? This cannot be undone.",
+  "@cloudDeleteFileConfirmation": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "cloudDeleteFolderConfirmation": "Delete the folder \"{name}\" and everything inside it? This cannot be undone.",
+  "@cloudDeleteFolderConfirmation": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "cloudDeleteFailed": "Failed to delete",
+  "cloudProgressImported": "Imported progress for {count} folders",
+  "@cloudProgressImported": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "cloudSortNameAsc": "Name (A to Z)",
   "cloudSortNameDesc": "Name (Z to A)"
 }

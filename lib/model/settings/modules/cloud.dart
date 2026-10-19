@@ -1,7 +1,29 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:aves/model/source/cloud/cloud_server.dart';
 import 'package:aves_model/aves_model.dart';
 
+// per folder viewing progress. A folder holding mostly images tracks how many
+// of its thumbnails have been loaded, a folder holding mostly subfolders tracks
+// how many of those have been opened. Only direct children are considered,
+// one level deep, so the numbers stay cheap to maintain.
+class CloudFolderStats {
+  int totalImages = 0;
+  int totalFolders = 0;
+  int visitedFolders = 0;
+  // 32 bit hashes of the image URLs whose thumbnails have been loaded
+  final Set<int> loaded = {};
+}
+
 mixin CloudSettings on SettingsAccess {
+  static const int _maxFolderStats = 2000;
+  static const int _maxLoadedPerFolder = 6000;
+
+  Map<String, CloudFolderStats>? _folderStatsCache;
+  Timer? _folderStatsFlushTimer;
+  bool _folderStatsDirty = false;
+
   List<CloudServer> get cloudServers {
     final stored = getStringList(SettingKeys.cloudServersKey);
     if (stored != null) return stored.map(CloudServer.fromJsonString).nonNulls.toList();
@@ -157,6 +179,199 @@ mixin CloudSettings on SettingsAccess {
     if (current.contains(url)) return;
     final next = [...current, url];
     cloudVisited = next.length > 4000 ? next.sublist(next.length - 4000) : next;
+  }
+
+  // opening a subfolder also advances the progress of its parent, so a folder
+  // showing "3/12" does not need to be re-listed to know that
+  void markCloudFolderVisited(String url) {
+    if (url.isEmpty) return;
+    final wasVisited = isCloudVisited(url);
+    markCloudVisited(url);
+    if (wasVisited) return;
+    final parent = cloudParentUrl(url);
+    final stats = _folderStatsMap()[parent];
+    if (stats == null) return;
+    if (stats.visitedFolders < stats.totalFolders) {
+      stats.visitedFolders++;
+      _scheduleFolderStatsFlush();
+    }
+  }
+
+  static String cloudParentUrl(String url) {
+    final scheme = url.indexOf('://');
+    final last = url.lastIndexOf('/');
+    if (last <= scheme + 2) return url;
+    return url.substring(0, last + 1);
+  }
+
+  static int _hashUrl(String url) {
+    var hash = 0x811c9dc5;
+    for (final codeUnit in url.codeUnits) {
+      hash ^= codeUnit;
+      hash = (hash * 0x01000193) & 0xFFFFFFFF;
+    }
+    return hash;
+  }
+
+  Map<String, CloudFolderStats> _folderStatsMap() {
+    final cached = _folderStatsCache;
+    if (cached != null) return cached;
+    final map = <String, CloudFolderStats>{};
+    for (final row in getStringList(SettingKeys.cloudFolderStatsKey) ?? const <String>[]) {
+      final parts = row.split('\t');
+      if (parts.length < 5) continue;
+      final totalImages = int.tryParse(parts[1]) ?? 0;
+      final totalFolders = int.tryParse(parts[2]) ?? 0;
+      final visitedFolders = int.tryParse(parts[3]) ?? 0;
+      final hashes = parts[4].isEmpty ? const <int>[] : parts[4].split(',').map((v) => int.tryParse(v, radix: 16)).nonNulls;
+      map[parts[0]] = CloudFolderStats()
+        ..totalImages = totalImages
+        ..totalFolders = totalFolders
+        ..visitedFolders = visitedFolders
+        ..loaded.addAll(hashes);
+    }
+    return _folderStatsCache = map;
+  }
+
+  // records what the folder listing contains, so a parent row can later show
+  // the progress of its subfolders without listing them again
+  void recordCloudFolder(String url, {required int imageCount, required int folderCount}) {
+    final map = _folderStatsMap();
+    var stats = map[url];
+    if (stats == null) {
+      if (map.length >= _maxFolderStats) {
+        map.remove(map.keys.first);
+      }
+      stats = map[url] = CloudFolderStats();
+    }
+    var changed = false;
+    if (stats.totalImages != imageCount) {
+      stats.totalImages = imageCount;
+      changed = true;
+    }
+    if (stats.totalFolders != folderCount) {
+      stats.totalFolders = folderCount;
+      changed = true;
+    }
+    final cappedVisited = math.min(stats.visitedFolders, folderCount);
+    if (stats.visitedFolders != cappedVisited) {
+      stats.visitedFolders = cappedVisited;
+      changed = true;
+    }
+    if (changed) _scheduleFolderStatsFlush();
+  }
+
+  // a thumbnail was decoded and shown: count it once, keyed by its URL hash so
+  // the stored set stays compact even for folders with thousands of images
+  void markCloudImageLoaded(String imageUrl) {
+    if (imageUrl.isEmpty) return;
+    final stats = _folderStatsMap()[cloudParentUrl(imageUrl)];
+    if (stats == null || stats.loaded.length >= _maxLoadedPerFolder) return;
+    if (stats.loaded.add(_hashUrl(imageUrl))) {
+      _scheduleFolderStatsFlush();
+    }
+  }
+
+  // the picture no longer exists on the server: stop counting it as loaded
+  void forgetCloudImage(String imageUrl) {
+    final stats = _folderStatsMap()[cloudParentUrl(imageUrl)];
+    if (stats == null) return;
+    if (stats.loaded.remove(_hashUrl(imageUrl))) {
+      _scheduleFolderStatsFlush();
+    }
+  }
+
+  // the folder no longer exists on the server: drop its progress and its
+  // "already opened" mark
+  void forgetCloudFolder(String url) {
+    final map = _folderStatsMap();
+    if (map.remove(url) != null) {
+      _scheduleFolderStatsFlush();
+    }
+    final current = cloudVisited;
+    if (current.contains(url)) {
+      cloudVisited = current.where((v) => v != url).toList();
+    }
+  }
+
+  // "loaded/total" for an image folder, "opened/total" for a folder of folders.
+  // Folders that were never listed have no stats yet and show nothing.
+  String? cloudFolderProgressText(String url) {
+    final stats = _folderStatsMap()[url];
+    if (stats == null) return null;
+    // mostly images (or images only): report thumbnail progress
+    if (stats.totalImages > 0 && stats.totalImages >= stats.totalFolders) {
+      final loaded = math.min(stats.loaded.length, stats.totalImages);
+      return '$loaded/${stats.totalImages}';
+    }
+    if (stats.totalFolders > 0) {
+      final visited = math.min(stats.visitedFolders, stats.totalFolders);
+      return '$visited/${stats.totalFolders}';
+    }
+    return null;
+  }
+
+  void _scheduleFolderStatsFlush() {
+    _folderStatsDirty = true;
+    // thumbnails arrive in bursts while scrolling: persist once they settle
+    _folderStatsFlushTimer ??= Timer(const Duration(seconds: 2), flushCloudFolderStats);
+  }
+
+  void flushCloudFolderStats() {
+    _folderStatsFlushTimer?.cancel();
+    _folderStatsFlushTimer = null;
+    if (!_folderStatsDirty) return;
+    _folderStatsDirty = false;
+    final map = _folderStatsMap();
+    set(SettingKeys.cloudFolderStatsKey, [
+      for (final entry in map.entries) '${entry.key}\t${entry.value.totalImages}\t${entry.value.totalFolders}\t${entry.value.visitedFolders}\t${entry.value.loaded.map((h) => h.toRadixString(16).padLeft(8, '0')).join(',')}',
+    ]);
+  }
+
+  Map<String, Object?> exportCloudFolderStats() => {
+    'version': 1,
+    'folders': <String, Object?>{
+      for (final entry in _folderStatsMap().entries)
+        entry.key: <String, Object?>{
+          'images': entry.value.totalImages,
+          'folders': entry.value.totalFolders,
+          'visited': entry.value.visitedFolders,
+          'loaded': [for (final hash in entry.value.loaded) hash.toRadixString(16).padLeft(8, '0')],
+        },
+    },
+  };
+
+  // merges an exported backup into the current progress (never lowers a count)
+  int importCloudFolderStats(Object? json) {
+    if (json is! Map) return 0;
+    final folders = json['folders'];
+    if (folders is! Map) return 0;
+    final map = _folderStatsMap();
+    var count = 0;
+    for (final entry in folders.entries) {
+      final url = entry.key;
+      final value = entry.value;
+      if (url is! String || url.isEmpty || value is! Map) continue;
+      final stats = map.putIfAbsent(url, CloudFolderStats.new);
+      stats.totalImages = math.max(stats.totalImages, (value['images'] as num?)?.toInt() ?? 0);
+      stats.totalFolders = math.max(stats.totalFolders, (value['folders'] as num?)?.toInt() ?? 0);
+      stats.visitedFolders = math.max(stats.visitedFolders, (value['visited'] as num?)?.toInt() ?? 0);
+      final loaded = value['loaded'];
+      if (loaded is List) {
+        for (final item in loaded) {
+          final hash = item is int ? item : (item is String ? int.tryParse(item, radix: 16) : null);
+          if (hash != null && stats.loaded.length < _maxLoadedPerFolder) {
+            stats.loaded.add(hash);
+          }
+        }
+      }
+      count++;
+    }
+    if (count > 0) {
+      _folderStatsDirty = true;
+      flushCloudFolderStats();
+    }
+    return count;
   }
 
   // last playback position and duration of each video (milliseconds), so it

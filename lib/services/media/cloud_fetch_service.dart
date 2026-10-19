@@ -152,6 +152,19 @@ class CloudImageLoader {
 
 final cloudImageLoader = CloudImageLoader();
 
+// URIs whose video frame is being extracted (queued or running), so a tile can
+// show a progress indicator instead of an empty placeholder
+final ValueNotifier<Set<String>> cloudGeneratingVideoThumbnails = ValueNotifier(const {});
+
+void _setVideoThumbnailGenerating(String uri, bool generating) {
+  final current = cloudGeneratingVideoThumbnails.value;
+  final next = {...current};
+  final changed = generating ? next.add(uri) : next.remove(uri);
+  if (changed) {
+    cloudGeneratingVideoThumbnails.value = next;
+  }
+}
+
 // drops the cached payload of a cloud entry (the extracted video frame and any
 // downloaded image bytes), so the next request fetches it again
 Future<void> evictCloudThumbnail(String uri) async {
@@ -376,6 +389,7 @@ class CloudAwareMediaFetchService implements MediaFetchService {
 
     final generation = _generationOf(uri);
     final started = DateTime.now();
+    _setVideoThumbnailGenerating(uri, true);
     try {
       final source = await cloudRegistry.playbackSource(uri);
       final headers = source.headers.isEmpty ? null : source.headers;
@@ -445,6 +459,8 @@ class CloudAwareMediaFetchService implements MediaFetchService {
       }
       _logVideoThumbnail(uri, started, 'failed', extra: 'reason=${error.runtimeType} timeout=$isTimeout paused=$pausedDuringWait message=$error');
       rethrow;
+    } finally {
+      _setVideoThumbnailGenerating(uri, false);
     }
   }
 

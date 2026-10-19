@@ -9,6 +9,8 @@ Future<void> showCloudViewOptions(
   required String url,
   required bool video,
   Future<void> Function()? onRebuildThumbnails,
+  Future<void> Function()? onExportProgress,
+  Future<void> Function()? onImportProgress,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -16,7 +18,13 @@ Future<void> showCloudViewOptions(
     isScrollControlled: true,
     // never take more than half of the screen, the content scrolls instead
     constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height / 2),
-    builder: (context) => CloudViewOptionsSheet(url: url, video: video, onRebuildThumbnails: onRebuildThumbnails),
+    builder: (context) => CloudViewOptionsSheet(
+      url: url,
+      video: video,
+      onRebuildThumbnails: onRebuildThumbnails,
+      onExportProgress: onExportProgress,
+      onImportProgress: onImportProgress,
+    ),
   );
 }
 
@@ -31,8 +39,17 @@ class CloudViewOptionsSheet extends StatelessWidget {
   final String url;
   final bool video;
   final Future<void> Function()? onRebuildThumbnails;
+  final Future<void> Function()? onExportProgress;
+  final Future<void> Function()? onImportProgress;
 
-  const new({super.key, required this.url, required this.video, this.onRebuildThumbnails});
+  const new({
+    super.key,
+    required this.url,
+    required this.video,
+    this.onRebuildThumbnails,
+    this.onExportProgress,
+    this.onImportProgress,
+  });
 
   static IconData layoutIcon(String layout) => switch (layout) {
     'mosaic' => AIcons.layoutMosaic,
@@ -200,6 +217,26 @@ class CloudViewOptionsSheet extends StatelessWidget {
                       : () {
                           Navigator.pop(context);
                           onRebuildThumbnails!();
+                        },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.upload_file),
+                  title: Text(l10n.cloudExportProgress),
+                  onTap: onExportProgress == null
+                      ? null
+                      : () {
+                          Navigator.pop(context);
+                          onExportProgress!();
+                        },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.download),
+                  title: Text(l10n.cloudImportProgress),
+                  onTap: onImportProgress == null
+                      ? null
+                      : () {
+                          Navigator.pop(context);
+                          onImportProgress!();
                         },
                 ),
                 const Divider(height: 24),

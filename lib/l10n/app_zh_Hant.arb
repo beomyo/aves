@@ -1051,6 +1051,13 @@
     "cloudVideoThumbnailPosition": "取幀位置",
     "cloudThumbnailConcurrency": "並行擷取數",
     "cloudRebuildThumbnails": "重建縮圖",
+    "cloudNextFolder": "下一個資料夾：{name}",
+    "cloudExportProgress": "匯出檢視進度",
+    "cloudImportProgress": "匯入檢視進度",
+    "cloudDeleteFileConfirmation": "刪除「{name}」？此操作無法復原。",
+    "cloudDeleteFolderConfirmation": "刪除資料夾「{name}」及其中的全部內容？此操作無法復原。",
+    "cloudDeleteFailed": "刪除失敗",
+    "cloudProgressImported": "已匯入 {count} 個資料夾的進度",
     "cloudSortNameAsc": "名稱升冪（A→Z）",
     "cloudSortNameDesc": "名稱降冪（Z→A）"
 }

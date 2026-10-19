@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:aves/model/entry/cache.dart';
@@ -10,6 +11,7 @@ import 'package:aves/model/source/cloud/cloud_resource.dart';
 import 'package:aves/model/source/cloud/cloud_server.dart';
 import 'package:aves/ref/mime_types.dart';
 import 'package:aves/services/common/cloud_registry.dart';
+import 'package:aves/services/common/services.dart';
 import 'package:aves/services/media/cloud_fetch_service.dart';
 import 'package:aves/services/media/cloud_mime.dart';
 import 'package:aves/theme/format.dart';
@@ -28,6 +30,9 @@ import 'package:aves/widgets/cloud/cloud_video_page.dart';
 import 'package:aves/widgets/cloud/cloud_view_options.dart';
 import 'package:aves/widgets/cloud/cloud_viewer_page.dart';
 import 'package:aves_model/aves_model.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
@@ -57,7 +62,8 @@ class CloudBrowserPage extends StatefulWidget {
 class _CloudBrowserPageState extends State<CloudBrowserPage> {
   static const int _maxProbeCount = 400;
   static const int _probeConcurrency = 4;
-  static const double _mosaicSpacing = 4;
+  static const int _maxFolderSnapshots = 30;
+  static const int _maxFolderLists = 60;
 
   final ValueNotifier<_LoadState> _state = ValueNotifier(_LoadState.loading);
   final ValueNotifier<String> _error = ValueNotifier('');
@@ -66,11 +72,31 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   final ValueNotifier<bool> _isScrolling = ValueNotifier(false);
   final ScrollController _scrollController = ScrollController();
   final ScrollController _addressScrollController = ScrollController();
+  final GlobalKey _currentCrumbKey = GlobalKey();
+  final GlobalKey _addressViewportKey = GlobalKey();
 
-  List<String> _history = [];
+  // visited folders, in navigation order. Going back moves `_trailIndex`
+  // without dropping the deeper entries, so the address bar can still offer
+  // them and returning to one is instant (the listing is cached).
+  List<String> _trail = [];
+  int _trailIndex = 0;
   late String _currentUrl;
   Timer? _scrollTimer;
   StreamSubscription? _settingsSub;
+
+  // listing snapshots per folder, so navigating back and forth does not list
+  // the same folder again; `_folderLists` only keeps the folders of a listing
+  // and is enough to find the sibling to move to on over-scroll
+  final Map<String, _FolderSnapshot> _folderSnapshots = {};
+  final Map<String, List<CloudResource>> _folderLists = {};
+  final Set<String> _primingParents = {};
+
+  // over-scroll progress towards the next sibling folder (mosaic only)
+  final ValueNotifier<double> _nextFolderProgress = ValueNotifier(0);
+  final ValueNotifier<CloudResource?> _nextFolder = ValueNotifier(null);
+  Timer? _overscrollTimer;
+  double _overscroll = 0;
+  double _overscrollThreshold = 0;
 
   // scroll position per folder, to restore it when going back
   final Map<String, double> _scrollPositions = {};
@@ -94,7 +120,8 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   void initState() {
     super.initState();
     _currentUrl = widget.initialUrl ?? _baseUrl;
-    _history = _ancestorsFor(_currentUrl);
+    _trail = [..._ancestorsFor(_currentUrl), _currentUrl];
+    _trailIndex = _trail.length - 1;
     _scrollController.addListener(_onScroll);
     _settingsSub = settings.updateStream.listen((event) {
       if (const [
@@ -105,6 +132,8 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       ].contains(event.key)) {
         if (_resolvedLayout(_media.value) == 'mosaic') {
           _maybeProbe(_media.value, 'mosaic');
+          // the gesture needs the sibling list, which is only fetched lazily
+          _primeSiblings();
         }
       } else if (event.key == SettingKeys.cloudVideoPositionsKey) {
         // a duration probed while extracting a thumbnail arrived in the
@@ -126,6 +155,9 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     _settingsSub?.cancel();
     _scrollTimer?.cancel();
     _aspectFlushTimer?.cancel();
+    _overscrollTimer?.cancel();
+    // persist the progress gathered while browsing before the page goes away
+    settings.flushCloudFolderStats();
     _scrollController.dispose();
     _addressScrollController.dispose();
     _state.dispose();
@@ -133,6 +165,8 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     _folders.dispose();
     _media.dispose();
     _isScrolling.dispose();
+    _nextFolderProgress.dispose();
+    _nextFolder.dispose();
     super.dispose();
   }
 
@@ -161,7 +195,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   }
 
   String get _folderName {
-    final crumbs = _breadcrumbs();
+    final crumbs = _breadcrumbs(_currentUrl);
     return crumbs.isNotEmpty ? crumbs.last.$1 : context.l10n.webdavRoot;
   }
 
@@ -178,18 +212,45 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     return ancestors;
   }
 
-  List<(String, String)> _breadcrumbs() {
+  List<(String, String)> _breadcrumbs(String url) {
     final base = _baseUrl;
     final crumbs = <(String, String)>[];
-    if (_currentUrl.startsWith(base)) {
-      final segments = _currentUrl.substring(base.length).split('/').where((s) => s.isNotEmpty).toList();
+    if (url.startsWith(base)) {
+      final segments = url.substring(base.length).split('/').where((s) => s.isNotEmpty).toList();
       var acc = base;
       for (var i = 0; i < segments.length; i++) {
         acc = '$acc${segments[i]}/';
-        crumbs.add((_decode(segments[i]), i == segments.length - 1 ? _currentUrl : acc));
+        crumbs.add((_decode(segments[i]), i == segments.length - 1 ? url : acc));
       }
     }
     return crumbs;
+  }
+
+  // deepest folder reached on this branch. The trail keeps the entries the user
+  // went back from, so the address bar can offer them without re-listing.
+  String get _deepestTrailUrl {
+    var deepest = _currentUrl;
+    for (var i = _trailIndex + 1; i < _trail.length; i++) {
+      final url = _trail[i];
+      if (url != _currentUrl && url.startsWith(_currentUrl) && url.length > deepest.length) {
+        deepest = url;
+      }
+    }
+    return deepest;
+  }
+
+  static String _trimFolderUrl(String url) => url.endsWith('/') ? url.substring(0, url.length - 1) : url;
+
+  static bool _sameFolder(String a, String b) => _trimFolderUrl(a) == _trimFolderUrl(b);
+
+  String? _parentOf(String url) {
+    final current = _trimFolderUrl(url);
+    final base = _trimFolderUrl(_baseUrl);
+    if (current == base || !current.startsWith(base)) return null;
+    final last = current.lastIndexOf('/');
+    if (last < 0) return null;
+    final parent = current.substring(0, last + 1);
+    return parent.length > base.length ? parent : null;
   }
 
   static String _decode(String value) {
@@ -231,36 +292,175 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   }
 
   void _navigateTo(String url) {
-    if (url == _currentUrl) return;
+    if (_sameFolder(url, _currentUrl)) return;
     // stop generating the thumbnails of the folder being left
     _abandonThumbnailsSoon(_media.value.map((e) => e.uri));
     _rememberScrollPosition();
-    settings.markCloudVisited(url);
+    _resetOverscroll();
+    final existing = _trail.indexWhere((v) => _sameFolder(v, url));
+    if (existing >= 0) {
+      // already visited: reuse the cached listing instead of fetching it again
+      _trailIndex = existing;
+    } else {
+      // a genuinely new path: drop the forward entries and fetch once
+      _trail = [..._trail.take(_trailIndex + 1), url];
+      _trailIndex = _trail.length - 1;
+    }
+    // no-op when this folder was already opened, and advances its parent's
+    // "opened subfolders" progress otherwise
+    settings.markCloudFolderVisited(url);
     setState(() {
       _currentUrl = url;
-      _history = _ancestorsFor(url);
       _immersive = false;
     });
-    _fetch();
+    _showFolder(url);
   }
 
-  void _goUp() {
-    if (_history.isEmpty) return;
+  // moves back through the trail without dropping its forward entries, so the
+  // address bar can still show (and return to) the folder we came from
+  void _goBack() {
+    if (_trailIndex <= 0) return;
     _rememberScrollPosition();
-    final parent = _history.removeLast();
-    settings.markCloudVisited(parent);
+    _abandonThumbnailsSoon(_media.value.map((e) => e.uri));
+    _resetOverscroll();
+    _trailIndex--;
     setState(() {
-      _currentUrl = parent;
+      _currentUrl = _trail[_trailIndex];
       _immersive = false;
     });
-    _fetch();
+    _showFolder(_currentUrl);
   }
 
-  Future<void> _fetch() async {
+  void _showFolder(String url) {
+    final snapshot = _folderSnapshots[url];
+    if (snapshot == null) {
+      _fetch();
+      return;
+    }
+    _state.value = _LoadState.ready;
+    _folders.value = snapshot.folders;
+    _media.value = snapshot.media;
+    _rememberFolderList(url, snapshot.folders);
+    _restoreScrollPosition(url);
+    _revealCurrentCrumb();
+    _maybeProbe(snapshot.media, _resolvedLayout(snapshot.media));
+    _primeSiblings();
+  }
+
+  // keep the current segment visible even when the bar still shows the deeper
+  // folders we went back from
+  void _revealCurrentCrumb() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final crumbContext = _currentCrumbKey.currentContext;
+      final viewportContext = _addressViewportKey.currentContext;
+      if (crumbContext == null || viewportContext == null || !_addressScrollController.hasClients) return;
+      final crumbBox = crumbContext.findRenderObject() as RenderBox?;
+      final viewportBox = viewportContext.findRenderObject() as RenderBox?;
+      if (crumbBox == null || viewportBox == null || !crumbBox.hasSize || !viewportBox.hasSize) return;
+      // centre the current segment without touching the vertical scroll view
+      final offset = crumbBox.localToGlobal(Offset.zero, ancestor: viewportBox).dx;
+      final target = _addressScrollController.offset + offset - (viewportBox.size.width - crumbBox.size.width) / 2;
+      _addressScrollController.jumpTo(target.clamp(0.0, _addressScrollController.position.maxScrollExtent));
+    });
+  }
+
+  // in mosaic the layout depends on knowing the folder contents; keep the
+  // sibling list around so the over-scroll gesture can name the next folder
+  void _primeSiblings() {
+    // only the mosaic layout uses the gesture, so do not spend a request on it
+    if (_resolvedLayout(_media.value) != 'mosaic') return;
+    final parent = _parentOf(_currentUrl);
+    if (parent == null || _folderLists.containsKey(parent) || !_primingParents.add(parent)) return;
+    unawaited(_fetchSiblings(parent));
+  }
+
+  void _rememberFolderList(String parent, List<CloudResource> folders) {
+    _folderLists.remove(parent);
+    _folderLists[parent] = folders;
+    while (_folderLists.length > _maxFolderLists) {
+      _folderLists.remove(_folderLists.keys.first);
+    }
+  }
+
+  void _rememberSnapshot(String url, _FolderSnapshot snapshot) {
+    _folderSnapshots.remove(url);
+    _folderSnapshots[url] = snapshot;
+    while (_folderSnapshots.length > _maxFolderSnapshots) {
+      _folderSnapshots.remove(_folderSnapshots.keys.first);
+    }
+    _rememberFolderList(url, snapshot.folders);
+  }
+
+  Future<void> _fetchSiblings(String parent) async {
+    try {
+      final client = cloudRegistry.clientForServer(widget.server);
+      if (client == null) return;
+      final resources = await client.list(parent);
+      if (!mounted) return;
+      _rememberFolderList(parent, resources.where((r) => r.isCollection).toList());
+    } catch (_) {
+      // best effort: without the parent listing over-scroll navigation is
+      // simply unavailable for this folder
+    } finally {
+      _primingParents.remove(parent);
+    }
+  }
+
+  CloudResource? _nextFolderInParent() {
+    final parent = _parentOf(_currentUrl);
+    if (parent == null) return null;
+    final folders = _folderLists[parent];
+    if (folders == null || folders.length < 2) return null;
+    final sorted = _sortByName(folders, (f) => f.name, settings.cloudSort == 'nameDesc');
+    final index = sorted.indexWhere((f) => _sameFolder(f.url, _currentUrl));
+    if (index < 0 || index + 1 >= sorted.length) return null;
+    return sorted[index + 1];
+  }
+
+  bool _onScrollNotification(ScrollNotification notification) {
+    if (notification.depth != 0) return false;
+    if (notification is OverscrollNotification && notification.metrics.axis == Axis.vertical) {
+      if (_resolvedLayout(_media.value) != 'mosaic') return false;
+      if (notification.metrics.extentAfter > 0 || notification.overscroll <= 0) return false;
+      final next = _nextFolderInParent();
+      if (next == null) return false;
+      _nextFolder.value = next;
+      _overscrollThreshold = MediaQuery.sizeOf(context).height / 3;
+      _overscroll += notification.overscroll;
+      _nextFolderProgress.value = (_overscroll / _overscrollThreshold).clamp(0.0, 1.0);
+      _overscrollTimer?.cancel();
+      _overscrollTimer = Timer(const Duration(milliseconds: 700), _resetOverscroll);
+      if (_overscroll >= _overscrollThreshold) {
+        _resetOverscroll();
+        HapticFeedback.mediumImpact();
+        _navigateTo(next.url);
+      }
+      return false;
+    }
+    if (notification is ScrollUpdateNotification && notification.metrics.extentAfter > 0) {
+      _resetOverscroll();
+    }
+    return false;
+  }
+
+  void _resetOverscroll() {
+    _overscrollTimer?.cancel();
+    _overscrollTimer = null;
+    _overscroll = 0;
+    _nextFolderProgress.value = 0;
+    _nextFolder.value = null;
+  }
+
+  // `keepContent` is used by pull-to-refresh: the current tiles stay visible
+  // (and keep their entries, so video frames are not requested again) until the
+  // fresh listing replaces them
+  Future<void> _fetch({bool keepContent = false}) async {
     final url = _currentUrl;
-    _state.value = _LoadState.loading;
-    _folders.value = [];
-    _media.value = [];
+    if (!keepContent) {
+      _state.value = _LoadState.loading;
+      _folders.value = [];
+      _media.value = [];
+    }
     _probeGeneration++;
     try {
       final client = cloudRegistry.clientForServer(widget.server);
@@ -271,32 +471,44 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       if (!mounted || url != _currentUrl) return;
 
       final folders = resources.where((r) => r.isCollection).toList();
+      final previous = keepContent ? {for (final entry in _media.value) entry.uri: entry} : const <String, AvesEntry>{};
       final media = <AvesEntry>[];
       var index = 0;
       for (final resource in resources.where((r) => !r.isCollection)) {
         final mime = _mimeForResource(resource);
         if (!MimeTypes.isImage(mime) && !MimeTypes.isVideo(mime)) continue;
-        media.add(_entryFromResource(resource, mime, -1 - index));
+        media.add(previous[resource.url] ?? _entryFromResource(resource, mime, -1 - index));
         index++;
       }
 
+      _rememberSnapshot(url, _FolderSnapshot(folders, media));
       _folders.value = folders;
       _media.value = media;
       _state.value = _LoadState.ready;
+
+      settings.recordCloudFolder(
+        url,
+        imageCount: media.where((e) => e.isImage).length,
+        folderCount: folders.length,
+      );
+      settings.markCloudFolderVisited(url);
 
       if (settings.cloudLastServerId != widget.server.id || settings.cloudLastUrl != url) {
         settings.setCloudLastLocation(widget.server.id, url);
       }
 
-      _restoreScrollPosition(url);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_addressScrollController.hasClients) {
-          _addressScrollController.jumpTo(_addressScrollController.position.maxScrollExtent);
-        }
-      });
+      if (!keepContent) {
+        _restoreScrollPosition(url);
+      }
+      _revealCurrentCrumb();
       _maybeProbe(media, _resolvedLayout(media));
+      _primeSiblings();
     } catch (error) {
       if (!mounted || url != _currentUrl) return;
+      if (keepContent) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text('$error')));
+        return;
+      }
       _error.value = error.toString();
       _state.value = _LoadState.error;
     }
@@ -362,6 +574,127 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     // aspect ratios were derived from the discarded images
     _aspects.clear();
     if (mounted) setState(() {});
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<bool> _confirmDelete(String message) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(context.l10n.entryActionDelete),
+        content: Text(message),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(context.l10n.webdavActionCancel)),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(context.l10n.entryActionDelete),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
+  // long press on a tile: delete the file from the server (no local copy)
+  Future<void> _deleteEntry(AvesEntry entry) async {
+    final name = entry.sourceTitle ?? entry.bestTitle ?? entry.uri;
+    if (!await _confirmDelete(context.l10n.cloudDeleteFileConfirmation(name)) || !mounted) return;
+    try {
+      final client = cloudRegistry.clientForServer(widget.server);
+      if (client == null) throw StateError('server not found');
+      await client.delete(entry.uri);
+      await evictCloudThumbnail(entry.uri);
+      EntryCache.evict(entry.uri);
+      if (entry.isImage) settings.forgetCloudImage(entry.uri);
+      _removeMedia(entry);
+    } catch (error) {
+      if (!mounted) return;
+      _showMessage('${context.l10n.cloudDeleteFailed}: $error');
+    }
+  }
+
+  void _removeMedia(AvesEntry entry) {
+    if (!mounted) return;
+    final url = _currentUrl;
+    final folders = _folders.value;
+    final media = _media.value.where((e) => e.uri != entry.uri).toList();
+    _media.value = media;
+    _rememberSnapshot(url, _FolderSnapshot(folders, media));
+    _aspects.remove(entry.uri);
+    settings.recordCloudFolder(
+      url,
+      imageCount: media.where((e) => e.isImage).length,
+      folderCount: folders.length,
+    );
+    setState(() {});
+  }
+
+  // long press on a folder row: delete it and everything it contains
+  Future<void> _deleteFolder(CloudResource folder) async {
+    if (!await _confirmDelete(context.l10n.cloudDeleteFolderConfirmation(folder.name)) || !mounted) return;
+    try {
+      final client = cloudRegistry.clientForServer(widget.server);
+      if (client == null) throw StateError('server not found');
+      await client.delete(folder.url);
+      _removeFolder(folder);
+    } catch (error) {
+      if (!mounted) return;
+      _showMessage('${context.l10n.cloudDeleteFailed}: $error');
+    }
+  }
+
+  void _removeFolder(CloudResource folder) {
+    if (!mounted) return;
+    final url = _currentUrl;
+    final folders = _folders.value.where((f) => f.url != folder.url).toList();
+    final media = _media.value;
+    _folders.value = folders;
+    _rememberSnapshot(url, _FolderSnapshot(folders, media));
+    settings.recordCloudFolder(
+      url,
+      imageCount: media.where((e) => e.isImage).length,
+      folderCount: folders.length,
+    );
+    settings.forgetCloudFolder(folder.url);
+    _folderSnapshots.remove(folder.url);
+    _folderLists.remove(folder.url);
+    setState(() {});
+  }
+
+  // a compact JSON backup of the folder progress, so reinstalling the app does
+  // not lose which pictures have already been seen
+  Future<void> _exportProgress() async {
+    final json = settings.exportCloudFolderStats();
+    final bytes = utf8.encode(const JsonEncoder.withIndent('  ').convert(json));
+    final basename = 'aves-cloud-progress-${DateTime.now().millisecondsSinceEpoch}';
+    final result = await storageService.createFile(basename: basename, mimeType: MimeTypes.json, bytes: bytes);
+    if (!mounted) return;
+    if (result == true) {
+      _showMessage(context.l10n.genericSuccessFeedback);
+    } else if (result == false) {
+      _showMessage(context.l10n.genericFailureFeedback);
+    }
+  }
+
+  Future<void> _importProgress() async {
+    final bytes = await storageService.openFile();
+    if (!mounted || bytes.isEmpty) return;
+    try {
+      final count = settings.importCloudFolderStats(jsonDecode(utf8.decode(bytes)));
+      if (count > 0) {
+        _showMessage(context.l10n.cloudProgressImported(count));
+        if (mounted) setState(() {});
+      } else {
+        _showMessage(context.l10n.genericFailureFeedback);
+      }
+    } catch (_) {
+      _showMessage(context.l10n.genericFailureFeedback);
+    }
   }
 
   // stops extracting the thumbnails of a folder that is no longer on screen,
@@ -501,25 +834,30 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _history.isEmpty,
+      canPop: _trailIndex <= 0,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) _goUp();
+        if (!didPop) _goBack();
       },
       child: AvesScaffold(
         drawer: const AppDrawer(),
-        body: ValueListenableBuilder<_LoadState>(
-          valueListenable: _state,
-          builder: (context, state, child) {
-            return ValueListenableBuilder<List<CloudResource>>(
-              valueListenable: _folders,
-              builder: (context, folders, child) {
-                return ValueListenableBuilder<List<AvesEntry>>(
-                  valueListenable: _media,
-                  builder: (context, media, child) => _buildScrollView(context, state: state, folders: folders, media: media),
+        body: Stack(
+          children: [
+            ValueListenableBuilder<_LoadState>(
+              valueListenable: _state,
+              builder: (context, state, child) {
+                return ValueListenableBuilder<List<CloudResource>>(
+                  valueListenable: _folders,
+                  builder: (context, folders, child) {
+                    return ValueListenableBuilder<List<AvesEntry>>(
+                      valueListenable: _media,
+                      builder: (context, media, child) => _buildScrollView(context, state: state, folders: folders, media: media),
+                    );
+                  },
                 );
               },
-            );
-          },
+            ),
+            _NextFolderHint(folder: _nextFolder, progress: _nextFolderProgress),
+          ],
         ),
       ),
     );
@@ -611,14 +949,22 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
         ),
         crumbTextBuilder: (label) => const SizedBox.shrink(),
         child: RefreshIndicator(
-          onRefresh: _fetch,
-          child: CustomScrollView(
-            controller: _scrollController,
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              _buildAppBar(context, immersiveEnabled, videoMode),
-              ...contentSlivers,
-            ],
+          // refresh keeps the current tiles (and their image providers) in
+          // place: clearing them made every video frame look regenerated
+          onRefresh: () => _fetch(keepContent: true),
+          child: NotificationListener<ScrollNotification>(
+            onNotification: _onScrollNotification,
+            child: CustomScrollView(
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              // build a screen and a half ahead, so thumbnails of the images
+              // about to enter the viewport are already on their way
+              scrollCacheExtent: layout == 'mosaic' || layout == 'grid' ? const ScrollCacheExtent.viewport(1) : const ScrollCacheExtent.pixels(800),
+              slivers: [
+                _buildAppBar(context, immersiveEnabled, videoMode),
+                ...contentSlivers,
+              ],
+            ),
           ),
         ),
       ),
@@ -648,7 +994,14 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
         IconButton(
           tooltip: context.l10n.webdavViewOptions,
           icon: const Icon(AIcons.layout),
-          onPressed: () => showCloudViewOptions(context, url: _currentUrl, video: videoMode, onRebuildThumbnails: _rebuildThumbnails),
+          onPressed: () => showCloudViewOptions(
+            context,
+            url: _currentUrl,
+            video: videoMode,
+            onRebuildThumbnails: _rebuildThumbnails,
+            onExportProgress: _exportProgress,
+            onImportProgress: _importProgress,
+          ),
         ),
       ],
       bottom: PreferredSize(
@@ -659,8 +1012,14 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   }
 
   Widget _buildAddressBar(BuildContext context) {
-    final crumbs = _breadcrumbs();
-    final atRoot = crumbs.isEmpty;
+    // the trail keeps the folders we went back from, so the address bar can
+    // still show that depth and return to any of them without re-listing
+    final crumbs = _breadcrumbs(_deepestTrailUrl);
+    final entries = <(String, String)>[(context.l10n.webdavRoot, _baseUrl), ...crumbs];
+    final currentIndex = entries.indexWhere((crumb) => _sameFolder(crumb.$2, _currentUrl));
+    final selected = currentIndex < 0 ? entries.length - 1 : currentIndex;
+    final atRoot = _sameFolder(_currentUrl, _baseUrl);
+    final disabledColor = Theme.of(context).disabledColor;
     return SizedBox(
       height: CloudBrowserPage.addressBarHeight,
       child: Row(
@@ -672,34 +1031,27 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
           ),
           Expanded(
             child: SingleChildScrollView(
+              key: _addressViewportKey,
               controller: _addressScrollController,
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Row(
                 children: [
-                  if (atRoot)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                      child: Text(
-                        context.l10n.webdavRoot,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.primary,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  for (var i = 0; i < crumbs.length; i++) ...[
+                  for (var i = 0; i < entries.length; i++) ...[
                     if (i > 0) const Icon(Icons.chevron_right, size: 16),
                     InkWell(
-                      onTap: i == crumbs.length - 1 ? null : () => _navigateTo(crumbs[i].$2),
+                      key: i == selected ? _currentCrumbKey : null,
+                      onTap: i == selected ? null : () => _navigateTo(entries[i].$2),
                       borderRadius: BorderRadius.circular(4),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                         child: Text(
-                          crumbs[i].$1,
+                          entries[i].$1,
                           style: TextStyle(
-                            color: i == crumbs.length - 1 ? Theme.of(context).colorScheme.primary : null,
-                            fontWeight: i == crumbs.length - 1 ? FontWeight.bold : null,
+                            // folders deeper than the current one were reached
+                            // before: dimmed, but still tappable to go forward
+                            color: i == selected ? Theme.of(context).colorScheme.primary : (i > selected ? disabledColor : null),
+                            fontWeight: i == selected ? FontWeight.bold : null,
                           ),
                         ),
                       ),
@@ -723,16 +1075,40 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     // folders already opened once are dimmed
     final visited = settings.cloudVisited.toSet();
     final disabledColor = Theme.of(context).disabledColor;
+    final hintColor = Theme.of(context).hintColor;
     return SliverList.builder(
       itemCount: folders.length,
       itemBuilder: (context, index) {
         final folder = folders[index];
         final isVisited = visited.contains(folder.url);
         final color = isVisited ? disabledColor : null;
+        // "loaded/total" for an image folder, "opened/total" for a folder of
+        // folders; one level deep, nothing is counted recursively
+        final progress = settings.cloudFolderProgressText(folder.url);
         return ListTile(
-          leading: Icon(AIcons.folder, color: color),
+          minLeadingWidth: 56,
+          leading: SizedBox(
+            width: 56,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(AIcons.folder, color: color),
+                if (progress != null)
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      progress,
+                      maxLines: 1,
+                      style: TextStyle(fontSize: 10, height: 1.1, color: color ?? hintColor),
+                    ),
+                  ),
+              ],
+            ),
+          ),
           title: Text(folder.name, style: TextStyle(color: color)),
           onTap: () => _openFolder(folder),
+          onLongPress: () => _deleteFolder(folder),
         );
       },
     );
@@ -747,11 +1123,26 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   }
 
   // watch progress (0..1) of a video, or null when unknown
-  static double? _progressOf(AvesEntry entry) {    if (!entry.isVideo) return null;
+  static double? _progressOf(AvesEntry entry) {
+    if (!entry.isVideo) return null;
     final position = settings.cloudVideoPosition(entry.uri);
     final duration = settings.cloudVideoDuration(entry.uri);
     if (position == null || duration == null || duration <= 0) return null;
     return (position / duration).clamp(0.0, 1.0);
+  }
+
+  // a thumbnail decoded: remember the aspect ratio for the mosaic layout and,
+  // for images, count the picture as loaded in its folder progress
+  void _onTileImageInfo(AvesEntry entry, ImageInfo info) {
+    final image = info.image;
+    final width = image.width;
+    final height = image.height;
+    if (width > 0 && height > 0) {
+      _onTileAspect(entry.uri, width / height);
+    }
+    if (entry.isImage) {
+      settings.markCloudImageLoaded(entry.uri);
+    }
   }
 
   static List<T> _sortByName<T>(List<T> items, String Function(T) nameOf, bool descending) {
@@ -776,19 +1167,21 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
           leading: SizedBox(
             width: 56,
             height: 56,
-            child: ThumbnailImage(
-              entry: entry,
-              extent: 56,
-              devicePixelRatio: dpr,
-              fit: BoxFit.cover,
-              cancellableNotifier: _isScrolling,
-              errorPlaceholder: entry.isVideo ? const _VideoPlaceholder() : null,
-              onImageInfo: entry.isVideo
-                  ? (info) {
-                      final image = info.image;
-                      if (image.width > 0 && image.height > 0) _onTileAspect(entry.uri, image.width / image.height);
-                    }
-                  : null,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (entry.isVideo) const _VideoPlaceholder(),
+                ThumbnailImage(
+                  entry: entry,
+                  extent: 56,
+                  devicePixelRatio: dpr,
+                  fit: BoxFit.cover,
+                  cancellableNotifier: _isScrolling,
+                  errorPlaceholder: entry.isVideo ? const SizedBox.shrink() : null,
+                  onImageInfo: (info) => _onTileImageInfo(entry, info),
+                ),
+                if (entry.isVideo) _VideoLoadingOverlay(entry.uri),
+              ],
             ),
           ),
           title: Text(
@@ -798,6 +1191,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
           subtitle: subtitleText.isEmpty ? null : Text(subtitleText),
           trailing: entry.isVideo && showVideoPlayIcon ? const Icon(Icons.play_circle_outline, size: 20) : null,
           onTap: () => _openEntry(entries, entry),
+          onLongPress: () => _deleteEntry(entry),
         );
       },
     );
@@ -807,41 +1201,40 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     final crossAxisCount = columns.round().clamp(1, 10);
     final width = MediaQuery.sizeOf(context).width;
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    return SliverPadding(
-      padding: const EdgeInsets.all(4),
-      sliver: SliverGrid.builder(
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: crossAxisCount,
-          mainAxisSpacing: 4,
-          crossAxisSpacing: 4,
-        ),
-        itemCount: entries.length,
-        itemBuilder: (context, index) {
-          final entry = entries[index];
-          return _CloudTile(
-            key: ValueKey(entry.uri),
-            entry: entry,
-            extent: width / crossAxisCount,
-            devicePixelRatio: dpr,
-            cancellableNotifier: _isScrolling,
-            showName: showNames,
-            showSize: showSizes,
-            watched: entry.isVideo && settings.isCloudVisited(entry.uri),
-            progress: _progressOf(entry),
-            onVideoAspect: _onTileAspect,
-            onTap: () => _openEntry(entries, entry),
-          );
-        },
+    // no padding or spacing: the images touch each other edge to edge
+    return SliverGrid.builder(
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        mainAxisSpacing: 0,
+        crossAxisSpacing: 0,
       ),
+      itemCount: entries.length,
+      itemBuilder: (context, index) {
+        final entry = entries[index];
+        return _CloudTile(
+          key: ValueKey(entry.uri),
+          entry: entry,
+          extent: width / crossAxisCount,
+          devicePixelRatio: dpr,
+          cancellableNotifier: _isScrolling,
+          showName: showNames,
+          showSize: showSizes,
+          watched: entry.isVideo && settings.isCloudVisited(entry.uri),
+          progress: _progressOf(entry),
+          onImageInfo: _onTileImageInfo,
+          onTap: () => _openEntry(entries, entry),
+          onLongPress: () => _deleteEntry(entry),
+        );
+      },
     );
   }
 
   List<Widget> _buildMosaicSlivers(BuildContext context, List<AvesEntry> entries, double columns, bool showNames, bool showSizes) {
-    const spacing = _mosaicSpacing;
     final width = MediaQuery.sizeOf(context).width;
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final targetHeight = width / columns;
-    final contentWidth = width - 8;
+    // no gaps: rows are edge to edge, and the whole mosaic uses the full width
+    final contentWidth = width;
     final rows = <(List<int> indices, double height)>[];
 
     var items = <int>[];
@@ -849,7 +1242,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
 
     void flushRow({required bool complete}) {
       if (items.isEmpty) return;
-      final height = complete ? (contentWidth - spacing * (items.length - 1)) / aspectSum : targetHeight;
+      final height = complete ? width / aspectSum : targetHeight;
       rows.add((List.of(items), height.clamp(48.0, targetHeight * 2.4)));
       items = [];
       aspectSum = 0;
@@ -857,8 +1250,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
 
     for (var i = 0; i < entries.length; i++) {
       final aspect = _aspectOf(entries[i]);
-      final nextCount = items.length + 1;
-      final nextWidth = (aspectSum + aspect) * targetHeight + spacing * (nextCount - 1);
+      final nextWidth = (aspectSum + aspect) * targetHeight;
       if (items.isNotEmpty && nextWidth > contentWidth) {
         flushRow(complete: true);
       }
@@ -868,43 +1260,36 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     flushRow(complete: false);
 
     return [
-      SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        sliver: SliverList.builder(
-          itemCount: rows.length,
-          itemBuilder: (context, rowIndex) {
-            final (indices, height) = rows[rowIndex];
-            return Padding(
-              padding: const EdgeInsets.only(bottom: spacing),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (var k = 0; k < indices.length; k++) ...[
-                    if (k > 0) const SizedBox(width: spacing),
-                    SizedBox(
-                      width: _aspectOf(entries[indices[k]]) * height,
-                      height: height,
-                      child: _CloudTile(
-                        key: ValueKey(entries[indices[k]].uri),
-                        entry: entries[indices[k]],
-                        extent: math.max(_aspectOf(entries[indices[k]]) * height, 48),
-                        devicePixelRatio: dpr,
-                        cancellableNotifier: _isScrolling,
-                        showName: showNames,
-                        showSize: showSizes,
-                        watched: entries[indices[k]].isVideo && settings.isCloudVisited(entries[indices[k]].uri),
-                        progress: _progressOf(entries[indices[k]]),
-                        isMosaic: true,
-                        onVideoAspect: _onTileAspect,
-                        onTap: () => _openEntry(entries, entries[indices[k]]),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            );
-          },
-        ),
+      SliverList.builder(
+        itemCount: rows.length,
+        itemBuilder: (context, rowIndex) {
+          final (indices, height) = rows[rowIndex];
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var k = 0; k < indices.length; k++)
+                SizedBox(
+                  width: _aspectOf(entries[indices[k]]) * height,
+                  height: height,
+                  child: _CloudTile(
+                    key: ValueKey(entries[indices[k]].uri),
+                    entry: entries[indices[k]],
+                    extent: math.max(_aspectOf(entries[indices[k]]) * height, 48),
+                    devicePixelRatio: dpr,
+                    cancellableNotifier: _isScrolling,
+                    showName: showNames,
+                    showSize: showSizes,
+                    watched: entries[indices[k]].isVideo && settings.isCloudVisited(entries[indices[k]].uri),
+                    progress: _progressOf(entries[indices[k]]),
+                    isMosaic: true,
+                    onImageInfo: _onTileImageInfo,
+                    onTap: () => _openEntry(entries, entries[indices[k]]),
+                    onLongPress: () => _deleteEntry(entries[indices[k]]),
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     ];
   }
@@ -997,7 +1382,8 @@ class _CloudTile extends StatelessWidget {
   final bool watched;
   final double? progress;
   final VoidCallback onTap;
-  final void Function(String uri, double aspect)? onVideoAspect;
+  final VoidCallback? onLongPress;
+  final void Function(AvesEntry entry, ImageInfo info)? onImageInfo;
 
   const new({
     super.key,
@@ -1006,23 +1392,14 @@ class _CloudTile extends StatelessWidget {
     required this.devicePixelRatio,
     required this.cancellableNotifier,
     required this.onTap,
+    this.onLongPress,
     this.isMosaic = false,
     this.showName = false,
     this.showSize = false,
     this.watched = false,
     this.progress,
-    this.onVideoAspect,
+    this.onImageInfo,
   });
-
-  void _onVideoInfo(ImageInfo info) {
-    final image = info.image;
-    final w = image.width;
-    final h = image.height;
-    if (w <= 0 || h <= 0) return;
-    // the extracted frame keeps the video aspect ratio, so it can drive the
-    // mosaic layout the same way probed image dimensions do
-    onVideoAspect?.call(entry.uri, w / h);
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1050,8 +1427,10 @@ class _CloudTile extends StatelessWidget {
             heroTag: null,
             showLoadingBackground: false,
             errorPlaceholder: const SizedBox.shrink(),
-            onImageInfo: _onVideoInfo,
+            onImageInfo: (info) => onImageInfo?.call(entry, info),
           ),
+          // the frame is being extracted: say so instead of showing an empty tile
+          _VideoLoadingOverlay(entry.uri),
           _VideoOverlay(
             progress: progress,
             durationText: _cloudVideoDurationText(entry, visible: showVideoDuration),
@@ -1068,6 +1447,7 @@ class _CloudTile extends StatelessWidget {
         isMosaic: isMosaic,
         cancellableNotifier: cancellableNotifier,
         heroTag: null,
+        onImageInfo: (info) => onImageInfo?.call(entry, info),
       );
     }
     // videos already watched are dimmed
@@ -1119,6 +1499,108 @@ class _CloudTile extends StatelessWidget {
         ],
       );
     }
-    return InkWell(onTap: onTap, child: content);
+    return InkWell(onTap: onTap, onLongPress: onLongPress, child: content);
   }
+}
+
+// a small spinner over a video tile while its frame is being extracted
+class _VideoLoadingOverlay extends StatelessWidget {
+  final String uri;
+
+  const new(this.uri);
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<Set<String>>(
+      valueListenable: cloudGeneratingVideoThumbnails,
+      builder: (context, generating, child) {
+        if (!generating.contains(uri)) return const SizedBox.shrink();
+        return const Center(
+          child: SizedBox(
+            width: 26,
+            height: 26,
+            child: DecoratedBox(
+              decoration: BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+              child: Padding(
+                padding: EdgeInsets.all(5),
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// over-scroll hint shown while the user is pulling past the end of a mosaic
+class _NextFolderHint extends StatelessWidget {
+  final ValueListenable<CloudResource?> folder;
+  final ValueListenable<double> progress;
+
+  const new({required this.folder, required this.progress});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<CloudResource?>(
+      valueListenable: folder,
+      builder: (context, next, child) {
+        if (next == null) return const SizedBox.shrink();
+        return ValueListenableBuilder<double>(
+          valueListenable: progress,
+          builder: (context, value, child) {
+            if (value <= 0) return const SizedBox.shrink();
+            return Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: EdgeInsets.only(left: 16, right: 16, bottom: 16 + MediaQuery.paddingOf(context).bottom),
+                child: IgnorePointer(
+                  child: Material(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.circular(24),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.keyboard_arrow_down, color: Colors.white, size: 20),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              context.l10n.cloudNextFolder(next.name),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Colors.white, fontSize: 13),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: 72,
+                            child: LinearProgressIndicator(
+                              value: value.clamp(0.0, 1.0),
+                              minHeight: 3,
+                              backgroundColor: Colors.white24,
+                              valueColor: const AlwaysStoppedAnimation(Colors.white),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+// listing kept in memory so navigating within the trail is instant
+class _FolderSnapshot {
+  final List<CloudResource> folders;
+  final List<AvesEntry> media;
+
+  const new(this.folders, this.media);
 }

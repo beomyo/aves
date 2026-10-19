@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:aves/model/entry/entry.dart';
 import 'package:aves/model/entry/extensions/images.dart';
 import 'package:aves/model/settings/settings.dart';
@@ -143,7 +145,7 @@ class _ViewerPageScrollPhysics extends PageScrollPhysics {
   _ViewerPageScrollPhysics applyTo(ScrollPhysics? ancestor) => _ViewerPageScrollPhysics(parent: buildParent(ancestor));
 
   @override
-  double get dragStartDistanceMotionThreshold => 24;
+  double get dragStartDistanceMotionThreshold => 48;
 }
 
 class _RemoteImagePage extends StatefulWidget {
@@ -156,14 +158,23 @@ class _RemoteImagePage extends StatefulWidget {
   State<_RemoteImagePage> createState() => _RemoteImagePageState();
 }
 
-class _RemoteImagePageState extends State<_RemoteImagePage> {
+class _RemoteImagePageState extends State<_RemoteImagePage> with SingleTickerProviderStateMixin {
+  static const double _doubleTapScale = 2.5;
+
   final TransformationController _transformationController = TransformationController();
+  late final AnimationController _zoomAnimation;
+  late final CurvedAnimation _zoomCurve;
+  Matrix4Tween? _zoomTween;
+  Offset? _doubleTapPosition;
   bool _zoomed = false;
   bool _multiTouch = false;
+  int _pointers = 0;
 
   @override
   void initState() {
     super.initState();
+    _zoomAnimation = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
+    _zoomCurve = CurvedAnimation(parent: _zoomAnimation, curve: Curves.easeOutCubic)..addListener(_onZoomTick);
     _transformationController.addListener(_onTransformChanged);
   }
 
@@ -175,9 +186,20 @@ class _RemoteImagePageState extends State<_RemoteImagePage> {
       final notify = widget.onBlockPaging;
       WidgetsBinding.instance.addPostFrameCallback((_) => notify(false));
     }
+    _zoomCurve
+      ..removeListener(_onZoomTick)
+      ..dispose();
+    _zoomAnimation.dispose();
     _transformationController.removeListener(_onTransformChanged);
     _transformationController.dispose();
     super.dispose();
+  }
+
+  void _onZoomTick() {
+    final tween = _zoomTween;
+    if (tween != null) {
+      _transformationController.value = tween.evaluate(_zoomCurve);
+    }
   }
 
   void _onTransformChanged() {
@@ -196,32 +218,89 @@ class _RemoteImagePageState extends State<_RemoteImagePage> {
 
   void _notify() => widget.onBlockPaging(_zoomed || _multiTouch);
 
+  // a second finger blocks paging immediately, without waiting for the gesture
+  // arena: otherwise the first finger's horizontal drag can win and the pinch
+  // is interpreted as a page change
+  void _onPointerDown(PointerDownEvent event) {
+    _pointers++;
+    if (_pointers >= 2) _setMultiTouch(true);
+  }
+
+  void _onPointerUp(PointerEvent event) {
+    _pointers = math.max(0, _pointers - 1);
+    if (_pointers < 2) _setMultiTouch(false);
+  }
+
+  void _handleDoubleTap() {
+    final target = _zoomed ? Matrix4.identity() : _zoomMatrix(_doubleTapPosition ?? Offset.zero, _doubleTapScale);
+    _zoomTween = Matrix4Tween(begin: _transformationController.value.clone(), end: target);
+    _zoomAnimation.forward(from: 0);
+  }
+
+  // zooms around the tapped point, keeping the child covering the viewport
+  Matrix4 _zoomMatrix(Offset focal, double scale) {
+    final size = context.size ?? Size.zero;
+    final maxX = math.max(0.0, size.width * (scale - 1));
+    final maxY = math.max(0.0, size.height * (scale - 1));
+    final tx = (-focal.dx * (scale - 1)).clamp(-maxX, 0.0);
+    final ty = (-focal.dy * (scale - 1)).clamp(-maxY, 0.0);
+    return Matrix4.identity()
+      ..translateByDouble(tx, ty, 0, 1)
+      ..scaleByDouble(scale, scale, 1, 1);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return InteractiveViewer(
-      transformationController: _transformationController,
-      // allow horizontal page swiping while not zoomed, panning while zoomed
-      panEnabled: _zoomed,
-      minScale: 1,
-      maxScale: 6,
-      onInteractionStart: (details) => _setMultiTouch(details.pointerCount >= 2),
-      onInteractionUpdate: (details) => _setMultiTouch(details.pointerCount >= 2),
-      onInteractionEnd: (details) => _setMultiTouch(false),
-      child: Center(
-        child: Image(
-          image: widget.entry.getFullImage(),
-          fit: BoxFit.contain,
-          gaplessPlayback: true,
-          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-            if (wasSynchronouslyLoaded) return child;
-            return frame == null ? const Center(child: CircularProgressIndicator()) : child;
-          },
-          errorBuilder: (context, error, stack) => const Center(
-            child: Icon(
-              AIcons.error,
-              color: Colors.white54,
-              size: 48,
-            ),
+    return Listener(
+      onPointerDown: _onPointerDown,
+      onPointerUp: _onPointerUp,
+      onPointerCancel: _onPointerUp,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onDoubleTapDown: (details) => _doubleTapPosition = details.localPosition,
+        onDoubleTap: _handleDoubleTap,
+        child: InteractiveViewer(
+          transformationController: _transformationController,
+          // allow horizontal page swiping while not zoomed, panning while zoomed
+          panEnabled: _zoomed,
+          minScale: 1,
+          maxScale: 6,
+          onInteractionStart: (details) => _setMultiTouch(details.pointerCount >= 2),
+          onInteractionUpdate: (details) => _setMultiTouch(details.pointerCount >= 2),
+          onInteractionEnd: (details) => _setMultiTouch(false),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // the tile thumbnail is already decoded, so it fills the screen
+              // immediately instead of a black page with a spinner
+              Image(
+                image: widget.entry.bestCachedThumbnail,
+                fit: BoxFit.contain,
+                gaplessPlayback: true,
+                errorBuilder: (context, error, stack) => const SizedBox.shrink(),
+              ),
+              // the full image fades in over the low resolution one
+              Image(
+                image: widget.entry.getFullImage(),
+                fit: BoxFit.contain,
+                gaplessPlayback: true,
+                frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                  if (wasSynchronouslyLoaded) return child;
+                  return AnimatedOpacity(
+                    opacity: frame == null ? 0 : 1,
+                    duration: const Duration(milliseconds: 180),
+                    child: child,
+                  );
+                },
+                errorBuilder: (context, error, stack) => const Center(
+                  child: Icon(
+                    AIcons.error,
+                    color: Colors.white54,
+                    size: 48,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),

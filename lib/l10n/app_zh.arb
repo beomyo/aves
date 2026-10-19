@@ -824,6 +824,13 @@
     "cloudVideoThumbnailPosition": "取帧位置",
     "cloudThumbnailConcurrency": "并发抽帧数",
     "cloudRebuildThumbnails": "重建缩略图",
+    "cloudNextFolder": "下一个文件夹：{name}",
+    "cloudExportProgress": "导出查看进度",
+    "cloudImportProgress": "导入查看进度",
+    "cloudDeleteFileConfirmation": "删除「{name}」？此操作无法撤销。",
+    "cloudDeleteFolderConfirmation": "删除文件夹「{name}」及其中的全部内容？此操作无法撤销。",
+    "cloudDeleteFailed": "删除失败",
+    "cloudProgressImported": "已导入 {count} 个文件夹的进度",
     "cloudSortNameAsc": "名称升序（A→Z）",
     "cloudSortNameDesc": "名称降序（Z→A）"
 }

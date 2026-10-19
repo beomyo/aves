@@ -30,6 +30,9 @@ abstract class CloudClient {
   // reads only the leading bytes of a file (used to sniff image dimensions)
   Future<Uint8List?> probeBytes(String url, {int maxBytes});
 
+  // deletes a file, or a folder and everything it contains
+  Future<void> delete(String url);
+
   // verifies that the server can be reached and browsed
   Future<void> testConnection();
 

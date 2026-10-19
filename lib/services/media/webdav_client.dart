@@ -24,6 +24,7 @@ class WebDavClient implements CloudClient {
 
   static const _listTimeout = Duration(seconds: 90);
   static const _getTimeout = Duration(seconds: 120);
+  static const _deleteTimeout = Duration(seconds: 120);
 
   final CloudServer server;
 
@@ -98,6 +99,26 @@ class WebDavClient implements CloudClient {
       throw CloudException('TLS handshake failed: ${e.message}');
     } on Exception catch (e) {
       throw CloudException('download failed: $e');
+    }
+  }
+
+  @override
+  Future<void> delete(String url) async {
+    final requestUrl = resolve(url);
+    try {
+      final response = await _client.delete(requestUrl, headers: requestHeaders).timeout(_deleteTimeout);
+      // a missing resource is already in the desired state
+      if (response.statusCode >= 400 && response.statusCode != 404) {
+        throw CloudException('failed to delete', statusCode: response.statusCode);
+      }
+    } on CloudException {
+      rethrow;
+    } on SocketException catch (e) {
+      throw CloudException('connection failed: ${e.message}');
+    } on HandshakeException catch (e) {
+      throw CloudException('TLS handshake failed: ${e.message}');
+    } on Exception catch (e) {
+      throw CloudException('delete failed: $e');
     }
   }
 

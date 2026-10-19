@@ -14,6 +14,7 @@ class SmbClient implements CloudClient {
   static const _readChunkSize = 256 * 1024;
   static const _listTimeout = Duration(seconds: 60);
   static const _readTimeout = Duration(seconds: 120);
+  static const _deleteTimeout = Duration(seconds: 120);
 
   final CloudServer server;
 
@@ -156,6 +157,18 @@ class SmbClient implements CloudClient {
       );
     }
     return resources;
+  }
+
+  // `SmbConnect.delete` removes a directory recursively, which is what a
+  // long-press on a folder is expected to do
+  @override
+  Future<void> delete(String url) {
+    return _withRetry(() async {
+      final connect = await _sureConnect();
+      final file = await connect.file(_smbPath(url));
+      if (!file.isExists) return;
+      await connect.delete(file);
+    }).timeout(_deleteTimeout);
   }
 
   @override
