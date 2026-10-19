@@ -25,6 +25,21 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.11"></a>[v1.19.11] - 2026-10-19
+
+### Added
+
+- Cloud browser: "Clear all progress" in the view options. It resets every folder's progress and the "already opened / already watched" marks; playback positions are kept, and a confirmation is required
+- Cloud browser: the view options are split into Layout, Display, Video and Progress tabs, so they fit in half a screen without a long scroll
+
+### Changed
+
+- Cloud: performance pass. Parsed settings (visited/watched URLs, video positions, per-folder layouts, the server list) are cached instead of being re-parsed for every tile or lookup; the disk cache tracks its size instead of scanning the directory on every write; concurrent requests for the same remote file share one download; cloud image tiles no longer decode the same file twice; listing snapshots are bounded by total entries, not only by folder count
+
+### Fixed
+
+- Cloud: importing or resetting the app settings now invalidates the cached parsed settings
+
 ## <a id="v1.19.10"></a>[v1.19.10] - 2026-10-19
 
 ### Fixed

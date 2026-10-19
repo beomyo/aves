@@ -1229,8 +1229,25 @@
       }
     }
   },
+  "cloudTabLayout": "Layout",
+  "cloudTabDisplay": "Display",
+  "cloudTabVideo": "Video",
+  "cloudTabProgress": "Progress",
   "cloudExportProgress": "Export viewing progress",
   "cloudImportProgress": "Import viewing progress",
+  "cloudClearProgress": "Clear all progress",
+  "cloudClearProgressConfirmation": "Clear the viewing progress and visited marks of every folder? Playback positions are kept. This cannot be undone.",
+  "cloudProgressSummary": "Folders: {folders} · Images: {images}",
+  "@cloudProgressSummary": {
+    "placeholders": {
+      "folders": {
+        "type": "int"
+      },
+      "images": {
+        "type": "int"
+      }
+    }
+  },
   "cloudDeleteFileConfirmation": "Delete \"{name}\"? This cannot be undone.",
   "@cloudDeleteFileConfirmation": {
     "placeholders": {

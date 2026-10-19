@@ -29,8 +29,19 @@ class CloudImageLoader {
   static const int _maxFullImageDim = 3072;
 
   final Map<String, double> _aspectCache = {};
+  // a thumbnail and the viewer can ask for the same file at the same time;
+  // share the download instead of fetching it twice
+  final Map<String, Future<Uint8List>> _inflight = {};
 
-  Future<Uint8List> bytesFor(String url) async {
+  Future<Uint8List> bytesFor(String url) {
+    final pending = _inflight[url];
+    if (pending != null) return pending;
+    final future = _loadBytes(url);
+    _inflight[url] = future;
+    return future.whenComplete(() => _inflight.remove(url));
+  }
+
+  Future<Uint8List> _loadBytes(String url) async {
     final cached = await cloudDiskCache.get(url);
     if (cached != null) return cached;
 

@@ -62,12 +62,13 @@ class CloudBrowserPage extends StatefulWidget {
 class _CloudBrowserPageState extends State<CloudBrowserPage> {
   static const int _maxFolderSnapshots = 30;
   static const int _maxFolderLists = 60;
+  // bound the memory held by listing snapshots even when each folder is huge
+  static const int _maxSnapshotEntries = 20000;
 
   final ValueNotifier<_LoadState> _state = ValueNotifier(_LoadState.loading);
   final ValueNotifier<String> _error = ValueNotifier('');
   final ValueNotifier<List<CloudResource>> _folders = ValueNotifier([]);
   final ValueNotifier<List<AvesEntry>> _media = ValueNotifier([]);
-  final ValueNotifier<bool> _isScrolling = ValueNotifier(false);
   final ScrollController _scrollController = ScrollController();
   final ScrollController _addressScrollController = ScrollController();
   final GlobalKey _currentCrumbKey = GlobalKey();
@@ -79,7 +80,6 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   List<String> _trail = [];
   int _trailIndex = 0;
   late String _currentUrl;
-  Timer? _scrollTimer;
   StreamSubscription? _settingsSub;
 
   // listing snapshots per folder, so navigating back and forth does not list
@@ -89,6 +89,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   final Map<String, List<CloudResource>> _folderLists = {};
   final Set<String> _primingParents = {};
   final Map<String, DateTime> _siblingRetryAfter = {};
+  int _snapshotEntryCount = 0;
 
   // over-scroll progress towards the next sibling folder (mosaic only)
   final ValueNotifier<double> _nextFolderProgress = ValueNotifier(0);
@@ -150,7 +151,6 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     // the page is going away: stop generating the thumbnails of this folder
     _abandonThumbnailsSoon(_media.value.map((e) => e.uri));
     _settingsSub?.cancel();
-    _scrollTimer?.cancel();
     _aspectFlushTimer?.cancel();
     _overscrollTimer?.cancel();
     // persist the progress gathered while browsing before the page goes away
@@ -161,20 +161,12 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     _error.dispose();
     _folders.dispose();
     _media.dispose();
-    _isScrolling.dispose();
     _nextFolderProgress.dispose();
     _nextFolder.dispose();
     super.dispose();
   }
 
   void _onScroll() {
-    // cancel pending thumbnail loads while scrolling
-    _isScrolling.value = true;
-    _scrollTimer?.cancel();
-    _scrollTimer = Timer(const Duration(milliseconds: 400), () {
-      _isScrolling.value = false;
-    });
-
     // near the end of a mosaic, fetch the parent listing so the over-scroll
     // gesture can name the next folder. Done here (not when the folder opens)
     // so it cannot delay browsing or the next folder's listing.
@@ -375,12 +367,14 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   // in mosaic the layout depends on knowing the folder contents; keep the
   // sibling list around so the over-scroll gesture can name the next folder
   void _primeSiblings() {
+    // cheapest checks first: this runs on every scroll tick near the bottom
+    if (_state.value != _LoadState.ready) return;
+    final parent = _parentOf(_currentUrl);
+    if (parent == null || _folderLists.containsKey(parent)) return;
     // only the mosaic layout uses the gesture, and only once its own listing
     // has arrived: do not compete with the request we are waiting for
-    if (_state.value != _LoadState.ready) return;
     if (_resolvedLayout(_media.value) != 'mosaic') return;
-    final parent = _parentOf(_currentUrl);
-    if (parent == null || _folderLists.containsKey(parent) || !_primingParents.add(parent)) return;
+    if (!_primingParents.add(parent)) return;
     final retryAfter = _siblingRetryAfter[parent];
     if (retryAfter != null && DateTime.now().isBefore(retryAfter)) {
       _primingParents.remove(parent);
@@ -398,10 +392,18 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   }
 
   void _rememberSnapshot(String url, _FolderSnapshot snapshot) {
-    _folderSnapshots.remove(url);
+    final previous = _folderSnapshots.remove(url);
+    if (previous != null) {
+      _snapshotEntryCount -= previous.folders.length + previous.media.length;
+    }
     _folderSnapshots[url] = snapshot;
-    while (_folderSnapshots.length > _maxFolderSnapshots) {
-      _folderSnapshots.remove(_folderSnapshots.keys.first);
+    _snapshotEntryCount += snapshot.folders.length + snapshot.media.length;
+    while (_folderSnapshots.length > _maxFolderSnapshots || (_snapshotEntryCount > _maxSnapshotEntries && _folderSnapshots.length > 1)) {
+      final firstKey = _folderSnapshots.keys.first;
+      final removed = _folderSnapshots.remove(firstKey);
+      if (removed != null) {
+        _snapshotEntryCount -= removed.folders.length + removed.media.length;
+      }
     }
     _rememberFolderList(url, snapshot.folders);
   }
@@ -460,7 +462,10 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       return false;
     }
     if (notification is ScrollUpdateNotification && notification.metrics.extentAfter > 0) {
-      _resetOverscroll();
+      // only touch the notifiers when a hint is actually showing
+      if (_overscroll != 0 || _nextFolder.value != null) {
+        _resetOverscroll();
+      }
     }
     return false;
   }
@@ -574,18 +579,18 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<bool> _confirmDelete(String message) async {
+  Future<bool> _confirm({required String title, required String message}) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(context.l10n.entryActionDelete),
+        title: Text(title),
         content: Text(message),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(context.l10n.webdavActionCancel)),
           TextButton(
             style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
             onPressed: () => Navigator.pop(context, true),
-            child: Text(context.l10n.entryActionDelete),
+            child: Text(title),
           ),
         ],
       ),
@@ -596,7 +601,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   // long press on a tile: delete the file from the server (no local copy)
   Future<void> _deleteEntry(AvesEntry entry) async {
     final name = entry.sourceTitle ?? entry.bestTitle ?? entry.uri;
-    if (!await _confirmDelete(context.l10n.cloudDeleteFileConfirmation(name)) || !mounted) return;
+    if (!await _confirm(title: context.l10n.entryActionDelete, message: context.l10n.cloudDeleteFileConfirmation(name)) || !mounted) return;
     try {
       final client = cloudRegistry.clientForServer(widget.server);
       if (client == null) throw StateError('server not found');
@@ -629,7 +634,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
 
   // long press on a folder row: delete it and everything it contains
   Future<void> _deleteFolder(CloudResource folder) async {
-    if (!await _confirmDelete(context.l10n.cloudDeleteFolderConfirmation(folder.name)) || !mounted) return;
+    if (!await _confirm(title: context.l10n.entryActionDelete, message: context.l10n.cloudDeleteFolderConfirmation(folder.name)) || !mounted) return;
     try {
       final client = cloudRegistry.clientForServer(widget.server);
       if (client == null) throw StateError('server not found');
@@ -672,6 +677,13 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     } else if (result == false) {
       _showMessage(context.l10n.genericFailureFeedback);
     }
+  }
+
+  Future<void> _clearProgress() async {
+    if (!await _confirm(title: context.l10n.cloudClearProgress, message: context.l10n.cloudClearProgressConfirmation) || !mounted) return;
+    settings.clearCloudFolderProgress();
+    setState(() {});
+    _showMessage(context.l10n.genericSuccessFeedback);
   }
 
   Future<void> _importProgress() async {
@@ -994,6 +1006,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
             onRebuildThumbnails: _rebuildThumbnails,
             onExportProgress: _exportProgress,
             onImportProgress: _importProgress,
+            onClearProgress: _clearProgress,
           ),
         ),
       ],
@@ -1065,16 +1078,14 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   }
 
   Widget _buildFolderSliver(BuildContext context, List<CloudResource> folders) {
-    // folders already opened once are dimmed
-    final visited = settings.cloudVisited.toSet();
     final disabledColor = Theme.of(context).disabledColor;
     final hintColor = Theme.of(context).hintColor;
     return SliverList.builder(
       itemCount: folders.length,
       itemBuilder: (context, index) {
         final folder = folders[index];
-        // collection URLs may differ by a trailing slash
-        final isVisited = visited.contains(folder.url) || settings.isCloudFolderVisited(folder.url);
+        // O(1) via the cached lookup; collection URLs may differ by a slash
+        final isVisited = settings.isCloudFolderVisited(folder.url);
         final color = isVisited ? disabledColor : null;
         // "loaded/total" for an image folder, "opened/total" for a folder of
         // folders; one level deep, nothing is counted recursively
@@ -1170,7 +1181,10 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
                   extent: 56,
                   devicePixelRatio: dpr,
                   fit: BoxFit.cover,
-                  cancellableNotifier: _isScrolling,
+                  // images are downloaded in full already: a second low-res
+                  // decode only adds work. Videos may have a cached frame at
+                  // another extent, which is worth showing at once.
+                  progressive: entry.isVideo,
                   errorPlaceholder: entry.isVideo ? const SizedBox.shrink() : null,
                   onImageInfo: (info) => _onTileImageInfo(entry, info),
                 ),
@@ -1210,7 +1224,6 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
           entry: entry,
           extent: width / crossAxisCount,
           devicePixelRatio: dpr,
-          cancellableNotifier: _isScrolling,
           showName: showNames,
           showSize: showSizes,
           watched: entry.isVideo && settings.isCloudVisited(entry.uri),
@@ -1270,7 +1283,6 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
                     entry: entries[indices[k]],
                     extent: math.max(_aspectOf(entries[indices[k]]) * height, 48),
                     devicePixelRatio: dpr,
-                    cancellableNotifier: _isScrolling,
                     showName: showNames,
                     showSize: showSizes,
                     watched: entries[indices[k]].isVideo && settings.isCloudVisited(entries[indices[k]].uri),
@@ -1369,7 +1381,6 @@ class _CloudTile extends StatelessWidget {
   final AvesEntry entry;
   final double extent;
   final double devicePixelRatio;
-  final ValueNotifier<bool> cancellableNotifier;
   final bool isMosaic;
   final bool showName;
   final bool showSize;
@@ -1384,7 +1395,6 @@ class _CloudTile extends StatelessWidget {
     required this.entry,
     required this.extent,
     required this.devicePixelRatio,
-    required this.cancellableNotifier,
     required this.onTap,
     this.onLongPress,
     this.isMosaic = false,
@@ -1417,7 +1427,6 @@ class _CloudTile extends StatelessWidget {
             devicePixelRatio: devicePixelRatio,
             fit: BoxFit.cover,
             isMosaic: isMosaic,
-            cancellableNotifier: cancellableNotifier,
             heroTag: null,
             showLoadingBackground: false,
             errorPlaceholder: const SizedBox.shrink(),
@@ -1439,8 +1448,10 @@ class _CloudTile extends StatelessWidget {
         devicePixelRatio: devicePixelRatio,
         fit: BoxFit.cover,
         isMosaic: isMosaic,
-        cancellableNotifier: cancellableNotifier,
         heroTag: null,
+        // the bytes are local already; a low-res pass would decode the same
+        // file a second time for no benefit on an image tile
+        progressive: false,
         onImageInfo: (info) => onImageInfo?.call(entry, info),
       );
     }

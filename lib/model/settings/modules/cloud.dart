@@ -24,20 +24,47 @@ mixin CloudSettings on SettingsAccess {
   Timer? _folderStatsFlushTimer;
   bool _folderStatsDirty = false;
 
+  // the store can be rewritten directly (settings reset/import), which bypasses
+  // the setters above; drop every parsed view so it is rebuilt from the store
+  void invalidateCloudCaches() {
+    _cloudServersCache = null;
+    _folderLayoutsCache = null;
+    _visitedLookup = null;
+    _videoPositionsCache = null;
+    _folderStatsCache = null;
+    _folderStatsFlushTimer?.cancel();
+    _folderStatsFlushTimer = null;
+    _folderStatsDirty = false;
+  }
+
+  // parsed views of the stored lists: each getter used to re-parse the whole
+  // list on every call, which happens per tile (video duration/progress) and
+  // per layout lookup, i.e. many times per frame
+  Map<String, String>? _folderLayoutsCache;
+  Set<String>? _visitedLookup;
+  Map<String, (int, int)>? _videoPositionsCache;
+
+  List<CloudServer>? _cloudServersCache;
+
   List<CloudServer> get cloudServers {
+    final cached = _cloudServersCache;
+    if (cached != null) return cached;
     final stored = getStringList(SettingKeys.cloudServersKey);
-    if (stored != null) return stored.map(CloudServer.fromJsonString).nonNulls.toList();
+    if (stored != null) return _cloudServersCache = stored.map(CloudServer.fromJsonString).nonNulls.toList();
     // migrate configurations saved before the WebDAV / SMB merge
     final legacy = getStringList(SettingKeys.legacyCloudServersKey);
     if (legacy != null && legacy.isNotEmpty) {
       final migrated = legacy.map(CloudServer.fromJsonString).nonNulls.toList();
       set(SettingKeys.cloudServersKey, migrated.map((server) => server.toJsonString()).toList());
-      return migrated;
+      return _cloudServersCache = migrated;
     }
-    return const [];
+    return _cloudServersCache = const [];
   }
 
-  set cloudServers(List<CloudServer> newValue) => set(SettingKeys.cloudServersKey, newValue.map((server) => server.toJsonString()).toList());
+  set cloudServers(List<CloudServer> newValue) {
+    _cloudServersCache = newValue;
+    set(SettingKeys.cloudServersKey, newValue.map((server) => server.toJsonString()).toList());
+  }
 
   void addCloudServer(CloudServer server) => cloudServers = [...cloudServers, server];
 
@@ -69,6 +96,8 @@ mixin CloudSettings on SettingsAccess {
   set cloudLayoutPerFolder(bool newValue) => set(SettingKeys.cloudLayoutPerFolderKey, newValue);
 
   Map<String, String> get _cloudFolderLayouts {
+    final cached = _folderLayoutsCache;
+    if (cached != null) return cached;
     final stored = getStringList(SettingKeys.cloudFolderLayoutsKey) ?? const [];
     final map = <String, String>{};
     for (final entry in stored) {
@@ -76,10 +105,13 @@ mixin CloudSettings on SettingsAccess {
       if (index <= 0) continue;
       map[entry.substring(0, index)] = entry.substring(index + 1);
     }
-    return map;
+    return _folderLayoutsCache = map;
   }
 
-  void _setCloudFolderLayouts(Map<String, String> map) => set(SettingKeys.cloudFolderLayoutsKey, [for (final e in map.entries) '${e.key}\t${e.value}']);
+  void _setCloudFolderLayouts(Map<String, String> map) {
+    _folderLayoutsCache = map;
+    set(SettingKeys.cloudFolderLayoutsKey, [for (final e in map.entries) '${e.key}\t${e.value}']);
+  }
 
   // effective layout for a folder
   String cloudLayoutFor(String url, {required bool video}) {
@@ -169,9 +201,15 @@ mixin CloudSettings on SettingsAccess {
   // URLs of folders already opened and of media already played, rendered dimmed
   List<String> get cloudVisited => getStringList(SettingKeys.cloudVisitedFoldersKey) ?? const [];
 
-  set cloudVisited(List<String> newValue) => set(SettingKeys.cloudVisitedFoldersKey, newValue);
+  set cloudVisited(List<String> newValue) {
+    _visitedLookup = null;
+    set(SettingKeys.cloudVisitedFoldersKey, newValue);
+  }
 
-  bool isCloudVisited(String url) => cloudVisited.contains(url);
+  // O(1) lookup for the per-tile "watched"/dimmed check
+  Set<String> get _cloudVisitedSet => _visitedLookup ??= cloudVisited.toSet();
+
+  bool isCloudVisited(String url) => _cloudVisitedSet.contains(url);
 
   void markCloudVisited(String url) {
     if (url.isEmpty) return;
@@ -187,7 +225,8 @@ mixin CloudSettings on SettingsAccess {
 
   bool isCloudFolderVisited(String url) {
     final key = cloudFolderKey(url);
-    return isCloudVisited(key) || isCloudVisited(key.substring(0, key.length - 1));
+    if (isCloudVisited(key)) return true;
+    return key == url ? false : isCloudVisited(url);
   }
 
   // opening a subfolder also advances the progress of its parent, so a folder
@@ -316,6 +355,22 @@ mixin CloudSettings on SettingsAccess {
     }
   }
 
+  int get cloudProgressFolderCount => _folderStatsMap().length;
+
+  int get cloudProgressImageCount => _folderStatsMap().values.fold(0, (sum, stats) => sum + math.min(stats.loaded.length, stats.totalImages));
+
+  // wipes every folder's viewing progress and the "already opened / already
+  // watched" marks. Playback positions and durations are kept.
+  void clearCloudFolderProgress() {
+    _folderStatsCache = null;
+    _folderStatsFlushTimer?.cancel();
+    _folderStatsFlushTimer = null;
+    _folderStatsDirty = false;
+    _visitedLookup = null;
+    set(SettingKeys.cloudFolderStatsKey, null);
+    set(SettingKeys.cloudVisitedFoldersKey, null);
+  }
+
   // "loaded/total" for an image folder, "opened/total" for a folder of folders.
   // Folders that were never listed have no stats yet and show nothing.
   String? cloudFolderProgressText(String url) {
@@ -346,9 +401,12 @@ mixin CloudSettings on SettingsAccess {
     if (!_folderStatsDirty) return;
     _folderStatsDirty = false;
     final map = _folderStatsMap();
-    set(SettingKeys.cloudFolderStatsKey, [
+    final rows = [
       for (final entry in map.entries) '${entry.key}\t${entry.value.totalImages}\t${entry.value.totalFolders}\t${entry.value.visitedFolders}\t${entry.value.loaded.map((h) => h.toRadixString(16).padLeft(8, '0')).join(',')}',
-    ]);
+    ];
+    // write silently: this runs every few seconds while thumbnails load, and a
+    // notification would rebuild every settings listener for no visible change
+    store.setStringList(SettingKeys.cloudFolderStatsKey, rows);
   }
 
   Map<String, Object?> exportCloudFolderStats() => {
@@ -400,6 +458,8 @@ mixin CloudSettings on SettingsAccess {
   // last playback position and duration of each video (milliseconds), so it
   // can both resume and show a progress bar on the tile
   Map<String, (int, int)> get _cloudVideoPositions {
+    final cached = _videoPositionsCache;
+    if (cached != null) return cached;
     final stored = getStringList(SettingKeys.cloudVideoPositionsKey) ?? const [];
     final map = <String, (int, int)>{};
     for (final entry in stored) {
@@ -410,7 +470,7 @@ mixin CloudSettings on SettingsAccess {
       if (position == null || duration == null) continue;
       map[parts.sublist(0, parts.length - 2).join('\t')] = (position, duration);
     }
-    return map;
+    return _videoPositionsCache = map;
   }
 
   int? cloudVideoPosition(String url) => _cloudVideoPositions[url]?.$1;
@@ -445,6 +505,7 @@ mixin CloudSettings on SettingsAccess {
     final entries = map.entries.toList();
     // keep the most recently watched entries, not the oldest
     final capped = entries.length > 4000 ? entries.sublist(entries.length - 4000) : entries;
+    _videoPositionsCache = Map.fromEntries(capped);
     set(SettingKeys.cloudVideoPositionsKey, [for (final e in capped) '${e.key}\t${e.value.$1}\t${e.value.$2}']);
   }
 

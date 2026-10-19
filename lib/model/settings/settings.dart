@@ -141,6 +141,7 @@ class Settings
     } else {
       await Future.forEach<String>(store.getKeys().whereNot(SettingKeys.isInternalKey), store.remove);
     }
+    invalidateCloudCaches();
   }
 
   Future<void> setContextualDefaults(AppFlavor flavor) async {
@@ -490,6 +491,8 @@ class Settings
       }
     });
     await sanitize();
+    // the import wrote the store directly, bypassing the cloud setters
+    invalidateCloudCaches();
     notifyListeners();
   }
 
