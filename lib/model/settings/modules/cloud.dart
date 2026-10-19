@@ -181,27 +181,46 @@ mixin CloudSettings on SettingsAccess {
     cloudVisited = next.length > 4000 ? next.sublist(next.length - 4000) : next;
   }
 
+  // canonical folder key, with a trailing slash, so a collection URL returned
+  // by a server with or without one maps to the same progress entry
+  static String cloudFolderKey(String url) => url.endsWith('/') ? url : '$url/';
+
+  bool isCloudFolderVisited(String url) {
+    final key = cloudFolderKey(url);
+    return isCloudVisited(key) || isCloudVisited(key.substring(0, key.length - 1));
+  }
+
   // opening a subfolder also advances the progress of its parent, so a folder
   // showing "3/12" does not need to be re-listed to know that
   void markCloudFolderVisited(String url) {
     if (url.isEmpty) return;
-    final wasVisited = isCloudVisited(url);
-    markCloudVisited(url);
+    final key = cloudFolderKey(url);
+    final wasVisited = isCloudVisited(key);
+    markCloudVisited(key);
     if (wasVisited) return;
-    final parent = cloudParentUrl(url);
+    final parent = cloudParentUrl(key);
     final stats = _folderStatsMap()[parent];
     if (stats == null) return;
     if (stats.visitedFolders < stats.totalFolders) {
       stats.visitedFolders++;
-      _scheduleFolderStatsFlush();
+      // an explicit navigation is rare: persist right away so that leaving the
+      // app immediately after opening a folder still records the visit
+      flushCloudFolderStats();
     }
   }
 
+  // parent of a file or of a folder. Collection URLs already end with a slash,
+  // which must be removed before looking for the previous separator, otherwise
+  // a folder would be reported as its own parent.
   static String cloudParentUrl(String url) {
-    final scheme = url.indexOf('://');
-    final last = url.lastIndexOf('/');
-    if (last <= scheme + 2) return url;
-    return url.substring(0, last + 1);
+    var value = url;
+    while (value.length > 1 && value.endsWith('/')) {
+      value = value.substring(0, value.length - 1);
+    }
+    final scheme = value.indexOf('://');
+    final last = value.lastIndexOf('/');
+    if (last <= scheme + 2) return value;
+    return value.substring(0, last + 1);
   }
 
   static int _hashUrl(String url) {
@@ -224,7 +243,8 @@ mixin CloudSettings on SettingsAccess {
       final totalFolders = int.tryParse(parts[2]) ?? 0;
       final visitedFolders = int.tryParse(parts[3]) ?? 0;
       final hashes = parts[4].isEmpty ? const <int>[] : parts[4].split(',').map((v) => int.tryParse(v, radix: 16)).nonNulls;
-      map[parts[0]] = CloudFolderStats()
+      // normalize legacy entries that were stored without a trailing slash
+      map[cloudFolderKey(parts[0])] = CloudFolderStats()
         ..totalImages = totalImages
         ..totalFolders = totalFolders
         ..visitedFolders = visitedFolders
@@ -236,13 +256,14 @@ mixin CloudSettings on SettingsAccess {
   // records what the folder listing contains, so a parent row can later show
   // the progress of its subfolders without listing them again
   void recordCloudFolder(String url, {required int imageCount, required int folderCount}) {
+    final key = cloudFolderKey(url);
     final map = _folderStatsMap();
-    var stats = map[url];
+    var stats = map[key];
     if (stats == null) {
       if (map.length >= _maxFolderStats) {
         map.remove(map.keys.first);
       }
-      stats = map[url] = CloudFolderStats();
+      stats = map[key] = CloudFolderStats();
     }
     var changed = false;
     if (stats.totalImages != imageCount) {
@@ -284,20 +305,21 @@ mixin CloudSettings on SettingsAccess {
   // the folder no longer exists on the server: drop its progress and its
   // "already opened" mark
   void forgetCloudFolder(String url) {
+    final key = cloudFolderKey(url);
     final map = _folderStatsMap();
-    if (map.remove(url) != null) {
+    if (map.remove(key) != null) {
       _scheduleFolderStatsFlush();
     }
     final current = cloudVisited;
-    if (current.contains(url)) {
-      cloudVisited = current.where((v) => v != url).toList();
+    if (current.contains(key) || current.contains(key.substring(0, key.length - 1))) {
+      cloudVisited = current.where((v) => v != key && v != key.substring(0, key.length - 1)).toList();
     }
   }
 
   // "loaded/total" for an image folder, "opened/total" for a folder of folders.
   // Folders that were never listed have no stats yet and show nothing.
   String? cloudFolderProgressText(String url) {
-    final stats = _folderStatsMap()[url];
+    final stats = _folderStatsMap()[cloudFolderKey(url)];
     if (stats == null) return null;
     // mostly images (or images only): report thumbnail progress
     if (stats.totalImages > 0 && stats.totalImages >= stats.totalFolders) {
@@ -313,8 +335,9 @@ mixin CloudSettings on SettingsAccess {
 
   void _scheduleFolderStatsFlush() {
     _folderStatsDirty = true;
-    // thumbnails arrive in bursts while scrolling: persist once they settle
-    _folderStatsFlushTimer ??= Timer(const Duration(seconds: 2), flushCloudFolderStats);
+    // thumbnails arrive in bursts while scrolling: persist once they settle,
+    // without rewriting the whole list on every few tiles
+    _folderStatsFlushTimer ??= Timer(const Duration(seconds: 5), flushCloudFolderStats);
   }
 
   void flushCloudFolderStats() {
@@ -352,7 +375,7 @@ mixin CloudSettings on SettingsAccess {
       final url = entry.key;
       final value = entry.value;
       if (url is! String || url.isEmpty || value is! Map) continue;
-      final stats = map.putIfAbsent(url, CloudFolderStats.new);
+      final stats = map.putIfAbsent(cloudFolderKey(url), CloudFolderStats.new);
       stats.totalImages = math.max(stats.totalImages, (value['images'] as num?)?.toInt() ?? 0);
       stats.totalFolders = math.max(stats.totalFolders, (value['folders'] as num?)?.toInt() ?? 0);
       stats.visitedFolders = math.max(stats.visitedFolders, (value['visited'] as num?)?.toInt() ?? 0);

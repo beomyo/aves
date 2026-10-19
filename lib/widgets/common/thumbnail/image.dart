@@ -169,12 +169,15 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
     return sizedThreshold > min(currentImage.width, currentImage.height);
   }
 
+  // pauses the request of a tile that is going away (disposed, or its entry
+  // changed). This matters when leaving a folder: queued remote thumbnails of
+  // the old folder would otherwise compete with the next folder's listing, and
+  // on a rate limited server that is a long delay. A re-created provider with
+  // the same key resumes the paused task, so scrolling back is unaffected.
   void _pauseProvider() async {
-    if (widget.cancellableNotifier?.value ?? false) {
-      final key = await _currentProviderStream?.provider.provider.obtainKey(ImageConfiguration.empty);
-      if (key is ThumbnailProviderKey) {
-        mediaFetchService.cancelThumbnail(key);
-      }
+    final key = await _currentProviderStream?.provider.provider.obtainKey(ImageConfiguration.empty);
+    if (key is ThumbnailProviderKey) {
+      mediaFetchService.cancelThumbnail(key);
     }
   }
 

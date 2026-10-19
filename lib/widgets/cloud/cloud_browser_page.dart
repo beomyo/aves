@@ -60,8 +60,6 @@ class CloudBrowserPage extends StatefulWidget {
 }
 
 class _CloudBrowserPageState extends State<CloudBrowserPage> {
-  static const int _maxProbeCount = 400;
-  static const int _probeConcurrency = 4;
   static const int _maxFolderSnapshots = 30;
   static const int _maxFolderLists = 60;
 
@@ -90,6 +88,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   final Map<String, _FolderSnapshot> _folderSnapshots = {};
   final Map<String, List<CloudResource>> _folderLists = {};
   final Set<String> _primingParents = {};
+  final Map<String, DateTime> _siblingRetryAfter = {};
 
   // over-scroll progress towards the next sibling folder (mosaic only)
   final ValueNotifier<double> _nextFolderProgress = ValueNotifier(0);
@@ -111,7 +110,6 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   // mosaic aspect ratios (uri -> width / height), filled in the background
   final Map<String, double> _aspects = {};
   Timer? _aspectFlushTimer;
-  int _probeGeneration = 0;
   Timer? _abandonTimer;
 
   String get _baseUrl => widget.server.url.endsWith('/') ? widget.server.url : '${widget.server.url}/';
@@ -119,7 +117,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   @override
   void initState() {
     super.initState();
-    _currentUrl = widget.initialUrl ?? _baseUrl;
+    _currentUrl = _asFolderUrl(widget.initialUrl ?? _baseUrl);
     _trail = [..._ancestorsFor(_currentUrl), _currentUrl];
     _trailIndex = _trail.length - 1;
     _scrollController.addListener(_onScroll);
@@ -130,10 +128,10 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
         SettingKeys.cloudFolderLayoutsKey,
         SettingKeys.cloudLayoutPerFolderKey,
       ].contains(event.key)) {
-        if (_resolvedLayout(_media.value) == 'mosaic') {
-          _maybeProbe(_media.value, 'mosaic');
-          // the gesture needs the sibling list, which is only fetched lazily
-          _primeSiblings();
+        // the mosaic lays out with the aspect ratios already learned from
+        // thumbnails; switching layouts only needs a rebuild
+        if (mounted && (ModalRoute.of(context)?.isCurrent ?? false)) {
+          setState(() {});
         }
       } else if (event.key == SettingKeys.cloudVideoPositionsKey) {
         // a duration probed while extracting a thumbnail arrived in the
@@ -149,7 +147,6 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
 
   @override
   void dispose() {
-    _probeGeneration++;
     // the page is going away: stop generating the thumbnails of this folder
     _abandonThumbnailsSoon(_media.value.map((e) => e.uri));
     _settingsSub?.cancel();
@@ -177,6 +174,16 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     _scrollTimer = Timer(const Duration(milliseconds: 400), () {
       _isScrolling.value = false;
     });
+
+    // near the end of a mosaic, fetch the parent listing so the over-scroll
+    // gesture can name the next folder. Done here (not when the folder opens)
+    // so it cannot delay browsing or the next folder's listing.
+    if (_scrollController.hasClients) {
+      final position = _scrollController.position;
+      if (position.extentAfter < position.viewportDimension * .5) {
+        _primeSiblings();
+      }
+    }
 
     if (!settings.cloudImmersive) {
       if (_immersive) setState(() => _immersive = false);
@@ -241,6 +248,10 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
 
   static String _trimFolderUrl(String url) => url.endsWith('/') ? url.substring(0, url.length - 1) : url;
 
+  // collection URLs from a server may or may not end with a slash; keep ours
+  // canonical so cache keys and progress entries always match
+  static String _asFolderUrl(String url) => url.endsWith('/') ? url : '$url/';
+
   static bool _sameFolder(String a, String b) => _trimFolderUrl(a) == _trimFolderUrl(b);
 
   String? _parentOf(String url) {
@@ -291,7 +302,8 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     });
   }
 
-  void _navigateTo(String url) {
+  void _navigateTo(String rawUrl) {
+    final url = _asFolderUrl(rawUrl);
     if (_sameFolder(url, _currentUrl)) return;
     // stop generating the thumbnails of the folder being left
     _abandonThumbnailsSoon(_media.value.map((e) => e.uri));
@@ -306,9 +318,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       _trail = [..._trail.take(_trailIndex + 1), url];
       _trailIndex = _trail.length - 1;
     }
-    // no-op when this folder was already opened, and advances its parent's
-    // "opened subfolders" progress otherwise
-    settings.markCloudFolderVisited(url);
+    // progress is recorded once the listing succeeds, never before the request
     setState(() {
       _currentUrl = url;
       _immersive = false;
@@ -343,8 +353,6 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     _rememberFolderList(url, snapshot.folders);
     _restoreScrollPosition(url);
     _revealCurrentCrumb();
-    _maybeProbe(snapshot.media, _resolvedLayout(snapshot.media));
-    _primeSiblings();
   }
 
   // keep the current segment visible even when the bar still shows the deeper
@@ -367,10 +375,17 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   // in mosaic the layout depends on knowing the folder contents; keep the
   // sibling list around so the over-scroll gesture can name the next folder
   void _primeSiblings() {
-    // only the mosaic layout uses the gesture, so do not spend a request on it
+    // only the mosaic layout uses the gesture, and only once its own listing
+    // has arrived: do not compete with the request we are waiting for
+    if (_state.value != _LoadState.ready) return;
     if (_resolvedLayout(_media.value) != 'mosaic') return;
     final parent = _parentOf(_currentUrl);
     if (parent == null || _folderLists.containsKey(parent) || !_primingParents.add(parent)) return;
+    final retryAfter = _siblingRetryAfter[parent];
+    if (retryAfter != null && DateTime.now().isBefore(retryAfter)) {
+      _primingParents.remove(parent);
+      return;
+    }
     unawaited(_fetchSiblings(parent));
   }
 
@@ -398,9 +413,11 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       final resources = await client.list(parent);
       if (!mounted) return;
       _rememberFolderList(parent, resources.where((r) => r.isCollection).toList());
+      _siblingRetryAfter.remove(parent);
     } catch (_) {
       // best effort: without the parent listing over-scroll navigation is
-      // simply unavailable for this folder
+      // simply unavailable for this folder. Do not retry on every scroll tick.
+      _siblingRetryAfter[parent] = DateTime.now().add(const Duration(seconds: 30));
     } finally {
       _primingParents.remove(parent);
     }
@@ -423,7 +440,12 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       if (_resolvedLayout(_media.value) != 'mosaic') return false;
       if (notification.metrics.extentAfter > 0 || notification.overscroll <= 0) return false;
       final next = _nextFolderInParent();
-      if (next == null) return false;
+      if (next == null) {
+        // the parent listing is not known yet: fetch it, the next attempt will
+        // be able to show the hint
+        _primeSiblings();
+        return false;
+      }
       _nextFolder.value = next;
       _overscrollThreshold = MediaQuery.sizeOf(context).height / 3;
       _overscroll += notification.overscroll;
@@ -461,7 +483,6 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       _folders.value = [];
       _media.value = [];
     }
-    _probeGeneration++;
     try {
       final client = cloudRegistry.clientForServer(widget.server);
       if (client == null) {
@@ -486,23 +507,24 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       _media.value = media;
       _state.value = _LoadState.ready;
 
-      settings.recordCloudFolder(
-        url,
-        imageCount: media.where((e) => e.isImage).length,
-        folderCount: folders.length,
-      );
-      settings.markCloudFolderVisited(url);
-
-      if (settings.cloudLastServerId != widget.server.id || settings.cloudLastUrl != url) {
-        settings.setCloudLastLocation(widget.server.id, url);
-      }
-
       if (!keepContent) {
         _restoreScrollPosition(url);
       }
       _revealCurrentCrumb();
-      _maybeProbe(media, _resolvedLayout(media));
-      _primeSiblings();
+
+      // the grid is on screen first: progress persistence and the "last
+      // location" write must not sit between the listing response and the frame,
+      // and must never run before the request (a slow store would delay it)
+      final imageCount = media.where((e) => e.isImage).length;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        settings.recordCloudFolder(url, imageCount: imageCount, folderCount: folders.length);
+        settings.markCloudFolderVisited(url);
+        if (mounted && url == _currentUrl) {
+          if (settings.cloudLastServerId != widget.server.id || settings.cloudLastUrl != url) {
+            settings.setCloudLastLocation(widget.server.id, url);
+          }
+        }
+      });
     } catch (error) {
       if (!mounted || url != _currentUrl) return;
       if (keepContent) {
@@ -514,38 +536,9 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     }
   }
 
-  void _maybeProbe(List<AvesEntry> media, String layout) {
-    if (layout != 'mosaic') return;
-    final generation = ++_probeGeneration;
-    final pending = <String>[];
-    for (final entry in media) {
-      if (!entry.isImage) continue;
-      if (_aspects.containsKey(entry.uri)) continue;
-      pending.add(entry.uri);
-      if (pending.length >= _maxProbeCount) break;
-    }
-    if (pending.isEmpty) return;
-
-    var index = 0;
-    Future<void> worker() async {
-      while (true) {
-        if (generation != _probeGeneration) return;
-        final i = index++;
-        if (i >= pending.length) return;
-        final aspect = await cloudImageLoader.probeAspect(pending[i]);
-        if (generation != _probeGeneration) return;
-        if (aspect != null) {
-          _aspects[pending[i]] = aspect;
-          _scheduleAspectFlush();
-        }
-      }
-    }
-
-    for (var w = 0; w < _probeConcurrency; w++) {
-      worker();
-    }
-  }
-
+  // the aspect ratio is learned from each thumbnail that loads (see
+  // `_onTileImageInfo`). Probing every file with a separate Range request used
+  // to flood rate limited servers and delay the next folder's listing.
   void _scheduleAspectFlush() {
     _aspectFlushTimer ??= Timer(const Duration(milliseconds: 200), () {
       _aspectFlushTimer = null;
@@ -1080,7 +1073,8 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       itemCount: folders.length,
       itemBuilder: (context, index) {
         final folder = folders[index];
-        final isVisited = visited.contains(folder.url);
+        // collection URLs may differ by a trailing slash
+        final isVisited = visited.contains(folder.url) || settings.isCloudFolderVisited(folder.url);
         final color = isVisited ? disabledColor : null;
         // "loaded/total" for an image folder, "opened/total" for a folder of
         // folders; one level deep, nothing is counted recursively

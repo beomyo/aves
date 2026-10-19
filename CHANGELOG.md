@@ -25,6 +25,14 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.10"></a>[v1.19.10] - 2026-10-19
+
+### Fixed
+
+- Cloud: opening a folder could be slow on a rate limited server. The mosaic probed the dimensions of up to 400 files with separate requests, and thumbnails queued for the folder being left kept competing with the next listing. Probes are gone (the aspect ratio is learned from the thumbnails that load anyway), a folder being left pauses its queued thumbnails, and the parent listing is only fetched near the end of the mosaic instead of when a folder opens
+- Cloud: opening a subfolder did not advance its parent's "opened/total" progress. A folder URL ending with a slash was treated as its own parent, so the visit was credited to the subfolder instead of the folder containing it
+- Cloud: folder progress and the last location were written while the listing was being requested; they are now written after the folder is displayed
+
 ## <a id="v1.19.9"></a>[v1.19.9] - 2026-10-19
 
 ### Added
