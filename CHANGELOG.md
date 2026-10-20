@@ -25,6 +25,17 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.12"></a>[v1.19.12] - 2026-10-19
+
+### Added
+
+- Cloud browser: the scroll position is remembered per folder, including across app restarts, so opening a folder returns to where you stopped
+- Cloud browser: an app bar toggle to hide completed folders (all image thumbnails loaded, or all subfolders opened). The over-scroll "next folder" skips them, and if every folder is hidden an action brings them back
+
+### Changed
+
+- Cloud browser: clearing all progress also clears the saved scroll positions (stated in the confirmation)
+
 ## <a id="v1.19.11"></a>[v1.19.11] - 2026-10-19
 
 ### Added

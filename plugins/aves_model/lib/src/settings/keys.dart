@@ -190,6 +190,9 @@ class SettingKeys {
   static const cloudVideoPlayIconKey = 'cloud_video_play_icon';
   // per folder viewing progress (image totals and thumbnail hashes)
   static const cloudFolderStatsKey = 'cloud_folder_stats';
+  // last scroll offset per folder, to resume where the user stopped
+  static const cloudFolderScrollPositionsKey = 'cloud_folder_scroll_positions';
+  static const cloudHideCompletedFoldersKey = 'cloud_hide_completed_folders';
   static const cloudLastServerIdKey = 'cloud_last_server_id';
   static const cloudLastUrlKey = 'cloud_last_url';
 

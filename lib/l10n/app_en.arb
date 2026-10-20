@@ -1236,7 +1236,10 @@
   "cloudExportProgress": "Export viewing progress",
   "cloudImportProgress": "Import viewing progress",
   "cloudClearProgress": "Clear all progress",
-  "cloudClearProgressConfirmation": "Clear the viewing progress and visited marks of every folder? Playback positions are kept. This cannot be undone.",
+  "cloudClearProgressConfirmation": "Clear the viewing progress, visited marks and scroll positions of every folder? Playback positions are kept. This cannot be undone.",
+  "cloudHideCompletedFolders": "Hide completed folders",
+  "cloudAllCompletedHidden": "All folders here are completed and hidden.",
+  "cloudShowCompletedFolders": "Show completed folders",
   "cloudProgressSummary": "Folders: {folders} · Images: {images}",
   "@cloudProgressSummary": {
     "placeholders": {

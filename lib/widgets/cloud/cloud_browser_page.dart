@@ -98,12 +98,10 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   double _overscroll = 0;
   double _overscrollThreshold = 0;
 
-  // scroll position per folder, to restore it when going back
-  final Map<String, double> _scrollPositions = {};
-
   // immersive: hide the app bar while scrolling down
   bool _immersive = false;
   double _lastScrollPixels = 0;
+  DateTime _lastScrollPersist = DateTime.fromMillisecondsSinceEpoch(0);
 
   // pinch to resize
   double _scaleStartColumns = 3;
@@ -155,6 +153,8 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     _overscrollTimer?.cancel();
     // persist the progress gathered while browsing before the page goes away
     settings.flushCloudFolderStats();
+    _rememberScrollPosition();
+    settings.flushCloudFolderScrolls();
     _scrollController.dispose();
     _addressScrollController.dispose();
     _state.dispose();
@@ -174,6 +174,13 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       final position = _scrollController.position;
       if (position.extentAfter < position.viewportDimension * .5) {
         _primeSiblings();
+      }
+      // save the position while scrolling (at most once a second), so it is
+      // not lost if the app is killed instead of navigating away
+      final now = DateTime.now();
+      if (now.difference(_lastScrollPersist) >= const Duration(seconds: 1)) {
+        _lastScrollPersist = now;
+        settings.setCloudFolderScroll(_currentUrl, position.pixels);
       }
     }
 
@@ -264,14 +271,16 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     }
   }
 
+  // persisted per folder, so the position survives leaving the browser and
+  // restarting the app
   void _rememberScrollPosition() {
     if (_scrollController.hasClients) {
-      _scrollPositions[_currentUrl] = _scrollController.offset;
+      settings.setCloudFolderScroll(_currentUrl, _scrollController.offset);
     }
   }
 
   void _restoreScrollPosition(String url) {
-    final target = _scrollPositions[url];
+    final target = settings.cloudFolderScroll(url);
     if (target == null || target <= 0) {
       _scrollTo(0, url);
       return;
@@ -432,8 +441,15 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     if (folders == null || folders.length < 2) return null;
     final sorted = _sortByName(folders, (f) => f.name, settings.cloudSort == 'nameDesc');
     final index = sorted.indexWhere((f) => _sameFolder(f.url, _currentUrl));
-    if (index < 0 || index + 1 >= sorted.length) return null;
-    return sorted[index + 1];
+    if (index < 0) return null;
+    // completed folders are skipped when the user chose to hide them
+    final hideCompleted = settings.cloudHideCompletedFolders;
+    for (var i = index + 1; i < sorted.length; i++) {
+      final folder = sorted[i];
+      if (hideCompleted && settings.cloudFolderProgressComplete(folder.url)) continue;
+      return folder;
+    }
+    return null;
   }
 
   bool _onScrollNotification(ScrollNotification notification) {
@@ -883,13 +899,15 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
 
     final sort = context.select<Settings, String>((s) => s.cloudSort);
     final descending = sort == 'nameDesc';
+    final hideCompleted = context.select<Settings, bool>((s) => s.cloudHideCompletedFolders);
 
     final visible = switch (mediaFilter) {
       'image' => media.where((e) => e.isImage).toList(),
       'video' => media.where((e) => e.isVideo).toList(),
       _ => media,
     };
-    final sortedFolders = _sortByName(folders, (f) => f.name, descending);
+    final allSortedFolders = _sortByName(folders, (f) => f.name, descending);
+    final sortedFolders = hideCompleted ? allSortedFolders.where((f) => !settings.cloudFolderProgressComplete(f.url)).toList() : allSortedFolders;
     final sortedVisible = _sortByName(visible, (e) => e.sourceTitle ?? e.bestTitle ?? '', descending);
 
     final List<Widget> contentSlivers;
@@ -913,7 +931,26 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
         ),
       ];
     } else if (sortedFolders.isEmpty && sortedVisible.isEmpty) {
-      contentSlivers = [SliverFillRemaining(hasScrollBody: false, child: EmptyContent(icon: AIcons.folder, text: context.l10n.webdavEmptyFolder))];
+      if (hideCompleted && allSortedFolders.isNotEmpty) {
+        contentSlivers = [
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: EmptyContent(
+              icon: Icons.filter_alt,
+              text: context.l10n.cloudAllCompletedHidden,
+              bottom: Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: TextButton(
+                  onPressed: () => settings.cloudHideCompletedFolders = false,
+                  child: Text(context.l10n.cloudShowCompletedFolders),
+                ),
+              ),
+            ),
+          ),
+        ];
+      } else {
+        contentSlivers = [SliverFillRemaining(hasScrollBody: false, child: EmptyContent(icon: AIcons.folder, text: context.l10n.webdavEmptyFolder))];
+      }
     } else {
       contentSlivers = [
         if (sortedFolders.isNotEmpty) _buildFolderSliver(context, sortedFolders),
@@ -991,6 +1028,13 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       ),
       title: Text(_folderName, maxLines: 1, overflow: TextOverflow.ellipsis),
       actions: [
+        IconButton(
+          isSelected: settings.cloudHideCompletedFolders,
+          tooltip: context.l10n.cloudHideCompletedFolders,
+          icon: const Icon(Icons.filter_alt_outlined),
+          selectedIcon: const Icon(Icons.filter_alt),
+          onPressed: () => settings.cloudHideCompletedFolders = !settings.cloudHideCompletedFolders,
+        ),
         IconButton(
           tooltip: context.l10n.cloudServersPageTitle,
           icon: const Icon(AIcons.cloud),

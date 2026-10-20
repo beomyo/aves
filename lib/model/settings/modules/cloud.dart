@@ -35,6 +35,10 @@ mixin CloudSettings on SettingsAccess {
     _folderStatsFlushTimer?.cancel();
     _folderStatsFlushTimer = null;
     _folderStatsDirty = false;
+    _scrollPositionsCache = null;
+    _scrollPositionsFlushTimer?.cancel();
+    _scrollPositionsFlushTimer = null;
+    _scrollPositionsDirty = false;
   }
 
   // parsed views of the stored lists: each getter used to re-parse the whole
@@ -43,6 +47,9 @@ mixin CloudSettings on SettingsAccess {
   Map<String, String>? _folderLayoutsCache;
   Set<String>? _visitedLookup;
   Map<String, (int, int)>? _videoPositionsCache;
+  Map<String, double>? _scrollPositionsCache;
+  Timer? _scrollPositionsFlushTimer;
+  bool _scrollPositionsDirty = false;
 
   List<CloudServer>? _cloudServersCache;
 
@@ -369,6 +376,7 @@ mixin CloudSettings on SettingsAccess {
     _visitedLookup = null;
     set(SettingKeys.cloudFolderStatsKey, null);
     set(SettingKeys.cloudVisitedFoldersKey, null);
+    clearCloudFolderScrolls();
   }
 
   // "loaded/total" for an image folder, "opened/total" for a folder of folders.
@@ -386,6 +394,77 @@ mixin CloudSettings on SettingsAccess {
       return '$visited/${stats.totalFolders}';
     }
     return null;
+  }
+
+  // whether the folder is fully seen: all its images have loaded thumbnails,
+  // or all its subfolders have been opened. Folders without stats are unknown.
+  bool cloudFolderProgressComplete(String url) {
+    final stats = _folderStatsMap()[cloudFolderKey(url)];
+    if (stats == null) return false;
+    if (stats.totalImages > 0 && stats.totalImages >= stats.totalFolders) {
+      return stats.loaded.length >= stats.totalImages;
+    }
+    if (stats.totalFolders > 0) {
+      return stats.visitedFolders >= stats.totalFolders;
+    }
+    return false;
+  }
+
+  bool get cloudHideCompletedFolders => getBool(SettingKeys.cloudHideCompletedFoldersKey) ?? false;
+
+  set cloudHideCompletedFolders(bool newValue) => set(SettingKeys.cloudHideCompletedFoldersKey, newValue);
+
+  // last scroll offset per folder, persisted so a restart resumes where the
+  // user stopped. Kept for the most recently used folders only.
+  Map<String, double> get _scrollPositions {
+    final cached = _scrollPositionsCache;
+    if (cached != null) return cached;
+    final map = <String, double>{};
+    for (final row in getStringList(SettingKeys.cloudFolderScrollPositionsKey) ?? const <String>[]) {
+      final index = row.lastIndexOf('\t');
+      if (index <= 0) continue;
+      final offset = double.tryParse(row.substring(index + 1));
+      if (offset == null) continue;
+      map[cloudFolderKey(row.substring(0, index))] = offset;
+    }
+    return _scrollPositionsCache = map;
+  }
+
+  double? cloudFolderScroll(String url) => _scrollPositions[cloudFolderKey(url)];
+
+  void setCloudFolderScroll(String url, double offset) {
+    if (url.isEmpty || !offset.isFinite || offset < 0) return;
+    final key = cloudFolderKey(url);
+    final map = _scrollPositions;
+    final current = map[key];
+    if (current != null && (current - offset).abs() < 1) return;
+    // move to the end so the most recently used folders are kept
+    map.remove(key);
+    map[key] = offset;
+    while (map.length > 500) {
+      map.remove(map.keys.first);
+    }
+    _scrollPositionsDirty = true;
+    _scrollPositionsFlushTimer ??= Timer(const Duration(seconds: 2), flushCloudFolderScrolls);
+  }
+
+  void flushCloudFolderScrolls() {
+    _scrollPositionsFlushTimer?.cancel();
+    _scrollPositionsFlushTimer = null;
+    if (!_scrollPositionsDirty) return;
+    _scrollPositionsDirty = false;
+    final rows = [
+      for (final entry in _scrollPositions.entries) '${entry.key}\t${entry.value.toStringAsFixed(1)}',
+    ];
+    store.setStringList(SettingKeys.cloudFolderScrollPositionsKey, rows);
+  }
+
+  void clearCloudFolderScrolls() {
+    _scrollPositionsCache = <String, double>{};
+    _scrollPositionsFlushTimer?.cancel();
+    _scrollPositionsFlushTimer = null;
+    _scrollPositionsDirty = false;
+    set(SettingKeys.cloudFolderScrollPositionsKey, null);
   }
 
   void _scheduleFolderStatsFlush() {
