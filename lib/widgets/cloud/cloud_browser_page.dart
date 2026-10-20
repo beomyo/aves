@@ -25,7 +25,6 @@ import 'package:aves/widgets/common/identity/empty.dart';
 import 'package:aves/widgets/common/identity/scroll_thumb.dart';
 import 'package:aves/widgets/common/thumbnail/image.dart';
 import 'package:aves/widgets/navigation/drawer/app_drawer.dart';
-import 'package:aves/widgets/cloud/cloud_server_list_page.dart';
 import 'package:aves/widgets/cloud/cloud_video_page.dart';
 import 'package:aves/widgets/cloud/cloud_view_options.dart';
 import 'package:aves/widgets/cloud/cloud_viewer_page.dart';
@@ -774,17 +773,6 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
 
   void _openFolder(CloudResource folder) => _navigateTo(folder.url);
 
-  // opens the service management page, so another service can be added from here
-  void _openServers() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        settings: const RouteSettings(name: CloudServerListPage.routeName),
-        builder: (context) => const CloudServerListPage(showResume: false),
-      ),
-    );
-  }
-
   Future<void> _openEntry(List<AvesEntry> visibleEntries, AvesEntry entry) async {
     if (entry.isVideo) {
       // remember that this video was opened, and where we stopped watching
@@ -1034,11 +1022,6 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
           icon: const Icon(Icons.filter_alt_outlined),
           selectedIcon: const Icon(Icons.filter_alt),
           onPressed: () => settings.cloudHideCompletedFolders = !settings.cloudHideCompletedFolders,
-        ),
-        IconButton(
-          tooltip: context.l10n.cloudServersPageTitle,
-          icon: const Icon(AIcons.cloud),
-          onPressed: _openServers,
         ),
         IconButton(
           tooltip: context.l10n.webdavViewOptions,
