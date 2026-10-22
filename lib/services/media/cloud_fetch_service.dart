@@ -166,14 +166,29 @@ final cloudImageLoader = CloudImageLoader();
 // URIs whose video frame is being extracted (queued or running), so a tile can
 // show a progress indicator instead of an empty placeholder
 final ValueNotifier<Set<String>> cloudGeneratingVideoThumbnails = ValueNotifier(const {});
+// more than one request for the same video can overlap (a rebuilt tile with a
+// different extent, another layout): count them so the first one to finish does
+// not clear the spinner while another is still extracting
+final Map<String, int> _videoGeneratingCounts = {};
 
 void _setVideoThumbnailGenerating(String uri, bool generating) {
-  final current = cloudGeneratingVideoThumbnails.value;
-  final next = {...current};
-  final changed = generating ? next.add(uri) : next.remove(uri);
-  if (changed) {
-    cloudGeneratingVideoThumbnails.value = next;
+  final before = _videoGeneratingCounts[uri] ?? 0;
+  final after = generating ? before + 1 : math.max(0, before - 1);
+  if (after <= 0) {
+    _videoGeneratingCounts.remove(uri);
+  } else {
+    _videoGeneratingCounts[uri] = after;
   }
+  final wasGenerating = before > 0;
+  final isGenerating = after > 0;
+  if (wasGenerating == isGenerating) return;
+  final next = {...cloudGeneratingVideoThumbnails.value};
+  if (isGenerating) {
+    next.add(uri);
+  } else {
+    next.remove(uri);
+  }
+  cloudGeneratingVideoThumbnails.value = next;
 }
 
 // drops the cached payload of a cloud entry (the extracted video frame and any
@@ -418,7 +433,11 @@ class CloudAwareMediaFetchService implements MediaFetchService {
               uriOverride: source.url,
               httpHeaders: headers,
               previewFraction: previewFraction,
-              taskKey: taskKey,
+              // deliberately not tied to the tile's task key: pausing a queued
+              // extraction when the tile goes away left this call (and the
+              // single extraction slot it holds) waiting for the 45s timeout,
+              // which stalled every other video thumbnail. The abandon check
+              // below still drops the queued work of a folder that was left.
               priority: priority ?? ServiceCallPriority.getVideoThumbnail,
             )
             .timeout(_videoThumbnailTimeout);

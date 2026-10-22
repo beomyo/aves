@@ -25,6 +25,12 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.14"></a>[v1.19.14] - 2026-10-22
+
+### Fixed
+
+- Cloud: video thumbnails could stay black after their spinner stopped. A tile going away paused its queued extraction while that call held the extraction slot, which stalled every other video thumbnail for up to the 45s timeout; the shared spinner could also be cleared by another request for the same video. Extractions are no longer tied to the tile's cancellable task, the spinner is counted per video, and a failed low-resolution preview no longer prevents the higher-resolution request from running
+
 ## <a id="v1.19.13"></a>[v1.19.13] - 2026-10-20
 
 ### Changed

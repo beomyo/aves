@@ -159,6 +159,13 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
 
   void _onError(Object exception, StackTrace? stackTrace) {
     if (!mounted) return;
+    // a failed low-quality pass (e.g. a cached video frame that was evicted
+    // from disk) must not hide the tile before the higher-quality provider ran
+    final nextIndex = _currentProviderStream == null ? 0 : (_providers.indexOf(_currentProviderStream!.provider) + 1);
+    if (nextIndex < _providers.length) {
+      _loadNextProvider();
+      return;
+    }
     setState(() => _lastException = exception);
   }
 
