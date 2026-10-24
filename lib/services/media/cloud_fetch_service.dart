@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:aves/image_providers/region_provider.dart';
 import 'package:aves/image_providers/thumbnail_provider.dart';
 import 'package:aves/model/entry/entry.dart';
+import 'package:aves/model/settings/modules/cloud.dart';
 import 'package:aves/model/settings/settings.dart';
 import 'package:aves/ref/mime_types.dart';
 import 'package:aves/services/common/cloud_registry.dart';
@@ -227,21 +228,21 @@ class CloudAwareMediaFetchService implements MediaFetchService {
   // is generous; extractions are also serialized below so the limit is shared
   // rather than multiplied
   static const _videoThumbnailTimeout = Duration(seconds: 45);
-  static const _videoThumbnailCooldown = Duration(seconds: 60);
+  static const _videoThumbnailCooldown = Duration(seconds: 30);
   // a timeout is usually a slow/rate limited server rather than a file that
   // cannot be thumbnailed, so retry it much sooner
-  static const _videoThumbnailTimeoutCooldown = Duration(seconds: 20);
+  static const _videoThumbnailTimeoutCooldown = Duration(seconds: 10);
   // extracted frames live in `cloudDiskCache`, so they survive a restart
   static const _videoThumbnailCachePrefix = 'video-thumb:';
 
   final MediaFetchService _delegate;
   final Map<String, DateTime> _videoThumbCooldown = {};
 
-  // how many extractions may hit the server at once; deliberately low by
-  // default, because parallel requests only multiply latency on a rate limited
-  // server. The limit is read on every acquire so the setting applies at once.
-  int _videoThumbnailRunning = 0;
-  final Queue<Completer<void>> _videoThumbnailWaiters = Queue();
+  // how many extractions may hit the server at once, per folder: different
+  // folders have different rate limits. The limit is read on every acquire so
+  // a change applies to the next extraction.
+  final Map<String, int> _videoThumbnailRunning = {};
+  final Map<String, Queue<Completer<void>>> _videoThumbnailWaiters = {};
 
   // generation per entry, bumped when the user leaves the folder it belongs to,
   // so queued extractions of that folder are dropped
@@ -360,23 +361,39 @@ class CloudAwareMediaFetchService implements MediaFetchService {
     }
   }
 
-  Future<void> _acquireVideoThumbnailSlot() async {
-    if (_videoThumbnailRunning < settings.cloudThumbnailConcurrency) {
-      _videoThumbnailRunning++;
+  static String _folderOf(String uri) => CloudSettings.cloudParentUrl(uri);
+
+  Future<void> _acquireVideoThumbnailSlot(String uri) async {
+    final folder = _folderOf(uri);
+    final limit = settings.cloudThumbnailConcurrencyForEntry(uri);
+    final running = _videoThumbnailRunning[folder] ?? 0;
+    if (running < limit) {
+      _videoThumbnailRunning[folder] = running + 1;
       return;
     }
     final completer = Completer<void>();
-    _videoThumbnailWaiters.add(completer);
+    (_videoThumbnailWaiters[folder] ??= Queue()).add(completer);
     // the releaser increments the counter on our behalf
     await completer.future;
   }
 
-  void _releaseVideoThumbnailSlot() {
-    _videoThumbnailRunning--;
-    final limit = settings.cloudThumbnailConcurrency;
-    while (_videoThumbnailWaiters.isNotEmpty && _videoThumbnailRunning < limit) {
-      _videoThumbnailRunning++;
-      _videoThumbnailWaiters.removeFirst().complete();
+  void _releaseVideoThumbnailSlot(String uri) {
+    final folder = _folderOf(uri);
+    var running = math.max(0, (_videoThumbnailRunning[folder] ?? 1) - 1);
+    _videoThumbnailRunning[folder] = running;
+    final waiters = _videoThumbnailWaiters[folder];
+    if (waiters == null) return;
+    final limit = settings.cloudThumbnailConcurrencyForEntry(uri);
+    while (waiters.isNotEmpty && running < limit) {
+      running++;
+      _videoThumbnailRunning[folder] = running;
+      waiters.removeFirst().complete();
+    }
+    if (waiters.isEmpty) {
+      _videoThumbnailWaiters.remove(folder);
+      if (running == 0) {
+        _videoThumbnailRunning.remove(folder);
+      }
     }
   }
 
@@ -423,7 +440,9 @@ class CloudAwareMediaFetchService implements MediaFetchService {
       // the budget covers the extraction itself, not the wait for a free slot, so
       // a queue of slow tiles is not reported as a failure
       late final Uint8List bytes;
-      await _acquireVideoThumbnailSlot();
+      // do not wait for a slot on behalf of a folder that was left
+      _throwIfAbandoned(generation, uri);
+      await _acquireVideoThumbnailSlot(uri);
       try {
         _throwIfAbandoned(generation, uri);
         bytes = await _delegate
@@ -442,7 +461,7 @@ class CloudAwareMediaFetchService implements MediaFetchService {
             )
             .timeout(_videoThumbnailTimeout);
       } finally {
-        _releaseVideoThumbnailSlot();
+        _releaseVideoThumbnailSlot(uri);
       }
       if (bytes.isNotEmpty) {
         final codec = await CloudImageLoader.decodeBounded(bytes, decoder, maxDim);

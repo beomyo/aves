@@ -186,6 +186,8 @@ class SettingKeys {
   static const cloudVideoThumbnailsKey = 'cloud_video_thumbnails';
   static const cloudVideoThumbnailPercentKey = 'cloud_video_thumbnail_percent';
   static const cloudThumbnailConcurrencyKey = 'cloud_thumbnail_concurrency';
+  static const cloudThumbnailFolderConcurrencyKey = 'cloud_thumbnail_folder_concurrency';
+  static const cloudThumbnailConcurrencyPerFolderKey = 'cloud_thumbnail_concurrency_per_folder';
   static const cloudVideoDurationKey = 'cloud_video_duration_visible';
   static const cloudVideoPlayIconKey = 'cloud_video_play_icon';
   // per folder viewing progress (image totals and thumbnail hashes)

@@ -1069,5 +1069,11 @@
     "cloudDeleteFailed": "刪除失敗",
     "cloudProgressImported": "已匯入 {count} 個資料夾的進度",
     "cloudSortNameAsc": "名稱升冪（A→Z）",
-    "cloudSortNameDesc": "名稱降冪（Z→A）"
+    "cloudSortNameDesc": "名稱降冪（Z→A）",
+    "cloudSortSizeAsc": "大小升冪（小→大）",
+    "cloudSortSizeDesc": "大小降冪（大→小）",
+    "cloudSortDurationAsc": "時長升冪（短→長）",
+    "cloudSortDurationDesc": "時長降冪（長→短）",
+    "cloudThumbnailConcurrencyPerFolder": "僅對目前資料夾生效",
+    "cloudUseGlobalConcurrency": "使用全域值"
 }

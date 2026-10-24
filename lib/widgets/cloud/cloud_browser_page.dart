@@ -37,6 +37,10 @@ import 'package:provider/provider.dart';
 
 enum _LoadState { loading, ready, error }
 
+// remote thumbnails can fail transiently (timeout, rate limit): retry a few
+// times with a growing delay, after the extraction cooldown has expired
+const _cloudThumbnailRetryDelays = [Duration(seconds: 6), Duration(seconds: 18), Duration(seconds: 45)];
+
 // duration badge of a cloud video, or null when it is unknown or hidden
 String? _cloudVideoDurationText(AvesEntry entry, {required bool visible}) {
   if (!entry.isVideo || !visible) return null;
@@ -886,7 +890,8 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     final headerHeight = topInset + kToolbarHeight + CloudBrowserPage.addressBarHeight;
 
     final sort = context.select<Settings, String>((s) => s.cloudSort);
-    final descending = sort == 'nameDesc';
+    // folders only have a name: keep them name-sorted whatever the media sort
+    final folderDescending = sort == 'nameDesc';
     final hideCompleted = context.select<Settings, bool>((s) => s.cloudHideCompletedFolders);
 
     final visible = switch (mediaFilter) {
@@ -894,9 +899,9 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       'video' => media.where((e) => e.isVideo).toList(),
       _ => media,
     };
-    final allSortedFolders = _sortByName(folders, (f) => f.name, descending);
+    final allSortedFolders = _sortByName(folders, (f) => f.name, folderDescending);
     final sortedFolders = hideCompleted ? allSortedFolders.where((f) => !settings.cloudFolderProgressComplete(f.url)).toList() : allSortedFolders;
-    final sortedVisible = _sortByName(visible, (e) => e.sourceTitle ?? e.bestTitle ?? '', descending);
+    final sortedVisible = _sortEntries(visible, sort);
 
     final List<Widget> contentSlivers;
     if (state == _LoadState.loading) {
@@ -1182,6 +1187,31 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     return descending ? sorted.reversed.toList() : sorted;
   }
 
+  // media sort: name, size or duration, each ascending or descending, with the
+  // name as a stable tie-breaker. Durations are the ones already known from
+  // extraction/playback; unknown values sort as 0.
+  static List<AvesEntry> _sortEntries(List<AvesEntry> entries, String sort) {
+    final descending = sort.endsWith('Desc');
+    final bySize = sort.startsWith('size');
+    final byDuration = sort.startsWith('duration');
+    int compare(AvesEntry a, AvesEntry b) {
+      final nameA = (a.sourceTitle ?? a.bestTitle ?? '').toLowerCase();
+      final nameB = (b.sourceTitle ?? b.bestTitle ?? '').toLowerCase();
+      int result;
+      if (bySize) {
+        result = (a.sizeBytes ?? 0).compareTo(b.sizeBytes ?? 0);
+      } else if (byDuration) {
+        result = (settings.cloudVideoDuration(a.uri) ?? 0).compareTo(settings.cloudVideoDuration(b.uri) ?? 0);
+      } else {
+        result = nameA.compareTo(nameB);
+      }
+      if (result == 0) result = nameA.compareTo(nameB);
+      return descending ? -result : result;
+    }
+
+    return [...entries]..sort(compare);
+  }
+
   Widget _buildListSliver(BuildContext context, List<AvesEntry> entries, bool showNames, bool showSizes) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final showVideoDuration = context.select<Settings, bool>((s) => s.cloudVideoDurationVisible);
@@ -1213,6 +1243,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
                   // another extent, which is worth showing at once.
                   progressive: entry.isVideo,
                   errorPlaceholder: entry.isVideo ? const SizedBox.shrink() : null,
+                  retryDelays: _cloudThumbnailRetryDelays,
                   onImageInfo: (info) => _onTileImageInfo(entry, info),
                 ),
                 if (entry.isVideo) _VideoLoadingOverlay(entry.uri),
@@ -1457,6 +1488,7 @@ class _CloudTile extends StatelessWidget {
             heroTag: null,
             showLoadingBackground: false,
             errorPlaceholder: const SizedBox.shrink(),
+            retryDelays: _cloudThumbnailRetryDelays,
             onImageInfo: (info) => onImageInfo?.call(entry, info),
           ),
           // the frame is being extracted: say so instead of showing an empty tile
@@ -1479,6 +1511,7 @@ class _CloudTile extends StatelessWidget {
         // the bytes are local already; a low-res pass would decode the same
         // file a second time for no benefit on an image tile
         progressive: false,
+        retryDelays: _cloudThumbnailRetryDelays,
         onImageInfo: (info) => onImageInfo?.call(entry, info),
       );
     }

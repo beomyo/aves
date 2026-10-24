@@ -842,5 +842,11 @@
     "cloudDeleteFailed": "删除失败",
     "cloudProgressImported": "已导入 {count} 个文件夹的进度",
     "cloudSortNameAsc": "名称升序（A→Z）",
-    "cloudSortNameDesc": "名称降序（Z→A）"
+    "cloudSortNameDesc": "名称降序（Z→A）",
+    "cloudSortSizeAsc": "大小升序（小→大）",
+    "cloudSortSizeDesc": "大小降序（大→小）",
+    "cloudSortDurationAsc": "时长升序（短→长）",
+    "cloudSortDurationDesc": "时长降序（长→短）",
+    "cloudThumbnailConcurrencyPerFolder": "仅对当前文件夹生效",
+    "cloudUseGlobalConcurrency": "使用全局值"
 }

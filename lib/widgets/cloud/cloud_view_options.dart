@@ -41,7 +41,7 @@ Future<void> showCloudViewOptions(
 class CloudViewOptionsSheet extends StatelessWidget {
   static const List<String> layoutValues = ['mosaic', 'grid', 'list'];
   static const List<String> mediaValues = ['all', 'image', 'video'];
-  static const List<String> sortValues = ['nameAsc', 'nameDesc'];
+  static const List<String> sortValues = ['nameAsc', 'nameDesc', 'sizeAsc', 'sizeDesc', 'durationAsc', 'durationDesc'];
 
   final String url;
   final bool video;
@@ -84,7 +84,14 @@ class CloudViewOptionsSheet extends StatelessWidget {
     _ => context.l10n.webdavMediaAll,
   };
 
-  static String sortName(BuildContext context, String sort) => sort == 'nameDesc' ? context.l10n.cloudSortNameDesc : context.l10n.cloudSortNameAsc;
+  static String sortName(BuildContext context, String sort) => switch (sort) {
+    'nameDesc' => context.l10n.cloudSortNameDesc,
+    'sizeAsc' => context.l10n.cloudSortSizeAsc,
+    'sizeDesc' => context.l10n.cloudSortSizeDesc,
+    'durationAsc' => context.l10n.cloudSortDurationAsc,
+    'durationDesc' => context.l10n.cloudSortDurationDesc,
+    _ => context.l10n.cloudSortNameAsc,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -184,7 +191,7 @@ class CloudViewOptionsSheet extends StatelessWidget {
           values: sortValues,
           selected: settings.cloudSort,
           label: (v) => sortName(context, v),
-          icon: (v) => v == 'nameDesc' ? AIcons.sortOrder : AIcons.sort,
+          icon: (v) => v.endsWith('Desc') ? AIcons.sortOrder : AIcons.sort,
           onSelected: (v) => settings.cloudSort = v,
         ),
         const Divider(height: 24),
@@ -217,7 +224,9 @@ class CloudViewOptionsSheet extends StatelessWidget {
     final l10n = context.l10n;
     final videoThumbnails = settings.cloudVideoThumbnails;
     final videoThumbnailPercent = settings.cloudVideoThumbnailPercent;
-    final thumbnailConcurrency = settings.cloudThumbnailConcurrency;
+    final perFolderConcurrency = settings.cloudThumbnailConcurrencyPerFolder;
+    final folderConcurrencyOverride = settings.cloudThumbnailConcurrencyOverride(url);
+    final thumbnailConcurrency = perFolderConcurrency ? settings.cloudThumbnailConcurrencyForFolder(url) : settings.cloudThumbnailConcurrency;
     return ListView(
       padding: const EdgeInsets.only(bottom: 16),
       children: [
@@ -249,6 +258,11 @@ class CloudViewOptionsSheet extends StatelessWidget {
               onChanged: (v) => settings.cloudVideoThumbnailPercent = v,
             ),
           ),
+          SwitchListTile(
+            title: Text(l10n.cloudThumbnailConcurrencyPerFolder),
+            value: perFolderConcurrency,
+            onChanged: (v) => settings.cloudThumbnailConcurrencyPerFolder = v,
+          ),
           _sectionTitle(context, '${l10n.cloudThumbnailConcurrency}  $thumbnailConcurrency'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -258,9 +272,27 @@ class CloudViewOptionsSheet extends StatelessWidget {
               max: CloudSettings.maxThumbnailConcurrency.toDouble(),
               divisions: CloudSettings.maxThumbnailConcurrency - CloudSettings.minThumbnailConcurrency,
               label: '$thumbnailConcurrency',
-              onChanged: (v) => settings.cloudThumbnailConcurrency = v.round(),
+              onChanged: (v) {
+                final value = v.round();
+                if (perFolderConcurrency) {
+                  settings.setCloudThumbnailConcurrencyForFolder(url, value);
+                } else {
+                  settings.cloudThumbnailConcurrency = value;
+                }
+              },
             ),
           ),
+          if (perFolderConcurrency && folderConcurrencyOverride != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => settings.clearCloudThumbnailConcurrencyForFolder(url),
+                  child: Text(l10n.cloudUseGlobalConcurrency),
+                ),
+              ),
+            ),
         ],
         const Divider(height: 24),
         // always available: frames captured during playback are affected too

@@ -1277,5 +1277,11 @@
     }
   },
   "cloudSortNameAsc": "Name (A to Z)",
-  "cloudSortNameDesc": "Name (Z to A)"
+  "cloudSortNameDesc": "Name (Z to A)",
+  "cloudSortSizeAsc": "Size (smallest first)",
+  "cloudSortSizeDesc": "Size (largest first)",
+  "cloudSortDurationAsc": "Duration (shortest first)",
+  "cloudSortDurationDesc": "Duration (longest first)",
+  "cloudThumbnailConcurrencyPerFolder": "Apply to this folder only",
+  "cloudUseGlobalConcurrency": "Use the global value"
 }

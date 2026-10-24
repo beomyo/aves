@@ -25,6 +25,18 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.15"></a>[v1.19.15] - 2026-10-24
+
+### Added
+
+- Cloud browser: sort by file size or video duration, ascending or descending, in addition to name. Folders stay name-sorted, and unknown durations sort as zero
+- Cloud: video thumbnail extraction concurrency is now configurable from 1 to 16 (was 1 to 4), and the value can be set for the current folder only, since servers rate limit folders differently
+- Cloud: failed or timed-out thumbnails are retried automatically after 6s, 18s and 45s, with a spinner while waiting, instead of staying black until the folder is reopened
+
+### Changed
+
+- Cloud: the cooldown after a failed video extraction is shorter (10s after a timeout, 30s after another failure) so an automatic retry can succeed
+
 ## <a id="v1.19.14"></a>[v1.19.14] - 2026-10-22
 
 ### Fixed

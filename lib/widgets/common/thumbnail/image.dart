@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:aves/image_providers/thumbnail_provider.dart';
@@ -33,6 +34,9 @@ class const ThumbnailImage({
   final Widget? errorPlaceholder,
   // called with the loaded image info (e.g. to record the real aspect ratio)
   final ValueChanged<ImageInfo>? onImageInfo,
+  // when not empty, a failed thumbnail is retried after each delay (in order)
+  // instead of showing the error placeholder after the first failure
+  final List<Duration> retryDelays = const [],
 }) extends StatefulWidget {
   @override
   State<ThumbnailImage> createState() => _ThumbnailImageState();
@@ -52,6 +56,9 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
   ImageInfo? _lastImageInfo;
   Object? _lastException;
   late final ImageStreamListener _streamListener;
+  int _retryAttempt = 0;
+  Timer? _retryTimer;
+  ImageProvider? _failedProvider;
 
   AvesEntry get entry => widget.entry;
 
@@ -77,6 +84,7 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
 
   @override
   void dispose() {
+    _retryTimer?.cancel();
     _unregisterWidget(widget);
     super.dispose();
   }
@@ -86,15 +94,25 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
     if (!visualChangeNotifier.isDisposed) {
       visualChangeNotifier.addListener(_onVisualChanged);
     }
+    _resetRetry();
     _initProvider();
   }
 
   void _unregisterWidget(ThumbnailImage widget) {
     widget.entry.visualChangeNotifier.removeListener(_onVisualChanged);
+    _retryTimer?.cancel();
+    _retryTimer = null;
     _pauseProvider();
     _currentProviderStream?.stopListening();
     _currentProviderStream = null;
     _replaceImage(null);
+  }
+
+  void _resetRetry() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _retryAttempt = 0;
+    _failedProvider = null;
   }
 
   void _initProvider() {
@@ -144,6 +162,7 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
   }
 
   void _onImageLoad(ImageInfo imageInfo, bool synchronousCall) {
+    _resetRetry();
     _replaceImage(imageInfo);
     widget.onImageInfo?.call(imageInfo);
     _loadNextProvider(imageInfo);
@@ -166,7 +185,35 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
       _loadNextProvider();
       return;
     }
+    if (_retryAttempt < widget.retryDelays.length) {
+      final delay = widget.retryDelays[_retryAttempt++];
+      _failedProvider = _currentProviderStream?.provider.provider;
+      _retryTimer?.cancel();
+      _retryTimer = Timer(delay, _retry);
+      // wait in the loading state (with a spinner) instead of the error state
+      setState(() => _lastException = null);
+      return;
+    }
     setState(() => _lastException = exception);
+  }
+
+  Future<void> _retry() async {
+    _retryTimer = null;
+    if (!mounted) return;
+    final failed = _failedProvider;
+    _failedProvider = null;
+    if (failed != null) {
+      try {
+        // drop the failed entry, otherwise resolving the same key replays the
+        // error immediately
+        await failed.evict();
+      } catch (_) {
+        // best effort
+      }
+    }
+    if (!mounted) return;
+    _initProvider();
+    setState(() {});
   }
 
   bool _needSizedProvider(ImageInfo? currentImageInfo) {
@@ -222,10 +269,27 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
     final fit = widget.fit ?? (entry.isSvg ? BoxFit.contain : BoxFit.cover);
     final imageInfo = _lastImageInfo;
     Widget image = imageInfo == null
-        ? Container(
-            color: widget.showLoadingBackground ? loadingBackgroundColor(context) : Colors.transparent,
+        ? SizedBox(
             width: thumbnailWidth,
             height: thumbnailHeight,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Container(
+                  color: widget.showLoadingBackground ? loadingBackgroundColor(context) : Colors.transparent,
+                ),
+                // a delayed retry is pending: keep showing progress instead of
+                // a silent black tile
+                if (_retryTimer != null)
+                  const Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+              ],
+            ),
           )
         : Selector<Settings, EntryBackground>(
             selector: (context, s) => s.imageBackground,
@@ -333,6 +397,7 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
   // when the entry image itself changed (e.g. after rotation)
   void _onVisualChanged() async {
     // rebuild to refresh the thumbnails
+    _resetRetry();
     _pauseProvider();
     _initProvider();
     setState(() {});

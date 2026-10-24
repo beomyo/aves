@@ -39,6 +39,7 @@ mixin CloudSettings on SettingsAccess {
     _scrollPositionsFlushTimer?.cancel();
     _scrollPositionsFlushTimer = null;
     _scrollPositionsDirty = false;
+    _folderConcurrencyCache = null;
   }
 
   // parsed views of the stored lists: each getter used to re-parse the whole
@@ -195,7 +196,53 @@ mixin CloudSettings on SettingsAccess {
 
   static const int defaultThumbnailConcurrency = 1;
   static const int minThumbnailConcurrency = 1;
-  static const int maxThumbnailConcurrency = 4;
+  static const int maxThumbnailConcurrency = 16;
+
+  // servers rate limit per folder, so a specific folder can override the
+  // global limit. `null` means the folder uses the global value.
+  Map<String, int>? _folderConcurrencyCache;
+
+  bool get cloudThumbnailConcurrencyPerFolder => getBool(SettingKeys.cloudThumbnailConcurrencyPerFolderKey) ?? false;
+
+  set cloudThumbnailConcurrencyPerFolder(bool newValue) => set(SettingKeys.cloudThumbnailConcurrencyPerFolderKey, newValue);
+
+  Map<String, int> get _folderConcurrency {
+    final cached = _folderConcurrencyCache;
+    if (cached != null) return cached;
+    final map = <String, int>{};
+    for (final row in getStringList(SettingKeys.cloudThumbnailFolderConcurrencyKey) ?? const <String>[]) {
+      final index = row.lastIndexOf('\t');
+      if (index <= 0) continue;
+      final value = int.tryParse(row.substring(index + 1));
+      if (value == null) continue;
+      map[cloudFolderKey(row.substring(0, index))] = value.clamp(minThumbnailConcurrency, maxThumbnailConcurrency);
+    }
+    return _folderConcurrencyCache = map;
+  }
+
+  int? cloudThumbnailConcurrencyOverride(String folderUrl) => _folderConcurrency[cloudFolderKey(folderUrl)];
+
+  // with the per-folder mode off, every folder uses the global value (stored
+  // overrides are kept but dormant, so switching back on restores them)
+  int cloudThumbnailConcurrencyForFolder(String folderUrl) {
+    if (!cloudThumbnailConcurrencyPerFolder) return cloudThumbnailConcurrency;
+    return (cloudThumbnailConcurrencyOverride(folderUrl) ?? cloudThumbnailConcurrency).clamp(minThumbnailConcurrency, maxThumbnailConcurrency);
+  }
+
+  // entry URLs point at a file: derive its containing folder
+  int cloudThumbnailConcurrencyForEntry(String entryUrl) => cloudThumbnailConcurrencyForFolder(cloudParentUrl(entryUrl));
+
+  void setCloudThumbnailConcurrencyForFolder(String folderUrl, int value) {
+    final map = _folderConcurrency;
+    map[cloudFolderKey(folderUrl)] = value.clamp(minThumbnailConcurrency, maxThumbnailConcurrency);
+    set(SettingKeys.cloudThumbnailFolderConcurrencyKey, [for (final e in map.entries) '${e.key}\t${e.value}']);
+  }
+
+  void clearCloudThumbnailConcurrencyForFolder(String folderUrl) {
+    final map = _folderConcurrency;
+    if (map.remove(cloudFolderKey(folderUrl)) == null) return;
+    set(SettingKeys.cloudThumbnailFolderConcurrencyKey, [for (final e in map.entries) '${e.key}\t${e.value}']);
+  }
 
   bool get cloudVideoDurationVisible => getBool(SettingKeys.cloudVideoDurationKey) ?? true;
 
