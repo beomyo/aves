@@ -228,10 +228,15 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
   // the old folder would otherwise compete with the next folder's listing, and
   // on a rate limited server that is a long delay. A re-created provider with
   // the same key resumes the paused task, so scrolling back is unaffected.
-  void _pauseProvider() async {
-    final key = await _currentProviderStream?.provider.provider.obtainKey(ImageConfiguration.empty);
-    if (key is ThumbnailProviderKey) {
-      mediaFetchService.cancelThumbnail(key);
+  //
+  // This must stay synchronous: pausing asynchronously (after awaiting the
+  // provider key) could land *after* the next tile resolved the same key,
+  // leaving the request paused with nobody left to resume it, i.e. a tile
+  // waiting for its thumbnail forever.
+  void _pauseProvider() {
+    final provider = _currentProviderStream?.provider.provider;
+    if (provider is ThumbnailProvider) {
+      mediaFetchService.cancelThumbnail(provider.key);
     }
   }
 

@@ -70,12 +70,26 @@ class ServicePolicy {
   void _pickNext() {
     _notifyQueueState();
     if (_runningQueue.length >= concurrentTaskMax) return;
-    final queue = _queues.entries.firstWhereOrNull((kv) => kv.value.isNotEmpty)?.value;
-    if (queue != null && queue.isNotEmpty) {
+    // a second call for a key that is already running (a tile rebuilt while
+    // its first request is in flight) must not be started on top of it: that
+    // used to double count and let the number of concurrent calls grow without
+    // bound. Rotate it behind the others and try the next one instead.
+    final queued = _queues.values.fold<int>(0, (sum, q) => sum + q.length);
+    var rotations = 0;
+    while (_runningQueue.length < concurrentTaskMax) {
+      final queue = _queues.entries.firstWhereOrNull((kv) => kv.value.isNotEmpty)?.value;
+      if (queue == null || queue.isEmpty) return;
       final key = queue.keys.first;
+      if (_runningQueue.containsKey(key)) {
+        final task = queue.remove(key)!;
+        queue[key] = task;
+        if (++rotations > queued) return;
+        continue;
+      }
       final task = queue.remove(key)!;
       _runningQueue[key] = task;
       task.callback();
+      if (_runningQueue.length >= concurrentTaskMax) return;
     }
   }
 

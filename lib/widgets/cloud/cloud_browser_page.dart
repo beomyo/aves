@@ -39,7 +39,7 @@ enum _LoadState { loading, ready, error }
 
 // remote thumbnails can fail transiently (timeout, rate limit): retry a few
 // times with a growing delay, after the extraction cooldown has expired
-const _cloudThumbnailRetryDelays = [Duration(seconds: 6), Duration(seconds: 18), Duration(seconds: 45)];
+const _cloudThumbnailRetryDelays = [Duration(seconds: 6), Duration(seconds: 18), Duration(seconds: 45), Duration(seconds: 90)];
 
 // duration badge of a cloud video, or null when it is unknown or hidden
 String? _cloudVideoDurationText(AvesEntry entry, {required bool visible}) {
@@ -149,8 +149,11 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
 
   @override
   void dispose() {
-    // the page is going away: stop generating the thumbnails of this folder
-    _abandonThumbnailsSoon(_media.value.map((e) => e.uri));
+    // the page is going away: stop downloading/generating the thumbnails of
+    // this folder
+    final leaving = _media.value.map((e) => e.uri).toList();
+    abandonCloudImages(leaving);
+    _abandonThumbnailsSoon(leaving);
     _settingsSub?.cancel();
     _aspectFlushTimer?.cancel();
     _overscrollTimer?.cancel();
@@ -309,8 +312,11 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   void _navigateTo(String rawUrl) {
     final url = _asFolderUrl(rawUrl);
     if (_sameFolder(url, _currentUrl)) return;
-    // stop generating the thumbnails of the folder being left
-    _abandonThumbnailsSoon(_media.value.map((e) => e.uri));
+    // stop the transfers and extractions of the folder being left: they would
+    // otherwise compete with the listing of the folder being opened
+    final leaving = _media.value.map((e) => e.uri).toList();
+    abandonCloudImages(leaving);
+    _abandonThumbnailsSoon(leaving);
     _rememberScrollPosition();
     _resetOverscroll();
     final existing = _trail.indexWhere((v) => _sameFolder(v, url));
@@ -335,7 +341,9 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   void _goBack() {
     if (_trailIndex <= 0) return;
     _rememberScrollPosition();
-    _abandonThumbnailsSoon(_media.value.map((e) => e.uri));
+    final leaving = _media.value.map((e) => e.uri).toList();
+    abandonCloudImages(leaving);
+    _abandonThumbnailsSoon(leaving);
     _resetOverscroll();
     _trailIndex--;
     setState(() {
@@ -992,9 +1000,11 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
             child: CustomScrollView(
               controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
-              // build a screen and a half ahead, so thumbnails of the images
-              // about to enter the viewport are already on their way
-              scrollCacheExtent: layout == 'mosaic' || layout == 'grid' ? const ScrollCacheExtent.viewport(1) : const ScrollCacheExtent.pixels(800),
+              // build half a screen ahead: every remote thumbnail is a full
+              // download, and preloading a whole extra screen queued dozens of
+              // files the user may never look at, delaying the visible ones
+              // and the next folder's listing
+              scrollCacheExtent: layout == 'mosaic' || layout == 'grid' ? const ScrollCacheExtent.viewport(.5) : const ScrollCacheExtent.pixels(800),
               slivers: [
                 _buildAppBar(context, immersiveEnabled, videoMode),
                 ...contentSlivers,
@@ -1511,6 +1521,8 @@ class _CloudTile extends StatelessWidget {
         // the bytes are local already; a low-res pass would decode the same
         // file a second time for no benefit on an image tile
         progressive: false,
+        // no `errorPlaceholder`: a tile that really cannot be loaded keeps the
+        // standard broken-image look instead of becoming an invisible hole
         retryDelays: _cloudThumbnailRetryDelays,
         onImageInfo: (info) => onImageInfo?.call(entry, info),
       );

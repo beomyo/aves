@@ -66,12 +66,14 @@ class SmbClient implements CloudClient {
       return await action();
     } catch (error) {
       if (error is CloudException) rethrow;
+      if (error is CloudAbortException) rethrow;
       if (_closed) rethrow;
       // a stale SMB session usually raises a plain error/string; retry once
       _reset();
       try {
         return await action();
       } catch (retryError) {
+        if (retryError is CloudAbortException) rethrow;
         throw CloudException(_describe(retryError));
       }
     }
@@ -172,8 +174,12 @@ class SmbClient implements CloudClient {
   }
 
   @override
-  Future<Uint8List> getBytes(String url) {
-    return _readRange(url).timeout(_readTimeout);
+  Future<Uint8List> getBytes(String url, {CloudAbort? abort}) {
+    // the deadline aborts the transfer itself, so a stalled read does not keep
+    // the session busy for the whole timeout
+    final deadline = CloudAbort();
+    final timer = Timer(_readTimeout, deadline.abort);
+    return _readRange(url, abort: abort, deadline: deadline).whenComplete(timer.cancel);
   }
 
   @override
@@ -189,7 +195,7 @@ class SmbClient implements CloudClient {
   // reads the file (optionally the leading `maxBytes`) through a random access
   // handle, so the data is fetched in large chunks instead of the tiny packets
   // used by the streaming API
-  Future<Uint8List> _readRange(String url, {int? maxBytes}) {
+  Future<Uint8List> _readRange(String url, {int? maxBytes, CloudAbort? abort, CloudAbort? deadline}) {
     final path = _smbPath(url);
     return _withRetry(() async {
       final connect = await _sureConnect();
@@ -201,19 +207,29 @@ class SmbClient implements CloudClient {
       final target = maxBytes == null ? total : (maxBytes < total ? maxBytes : total);
       final handle = await connect.open(file);
       final builder = BytesBuilder();
-      if (target > 0) {
-        await handle.setPosition(0);
-        final buffer = Uint8List(_readChunkSize);
-        var remaining = target;
-        while (remaining > 0) {
-          final wanted = remaining < _readChunkSize ? remaining : _readChunkSize;
-          final read = await handle.readInto(buffer, 0, wanted);
-          if (read <= 0) break;
-          builder.add(read == buffer.length ? buffer : Uint8List.view(buffer.buffer, 0, read));
-          remaining -= read;
+      try {
+        if (target > 0) {
+          await handle.setPosition(0);
+          final buffer = Uint8List(_readChunkSize);
+          var remaining = target;
+          while (remaining > 0) {
+            if ((abort?.aborted ?? false) || (deadline?.aborted ?? false)) {
+              throw const CloudAbortException();
+            }
+            final wanted = remaining < _readChunkSize ? remaining : _readChunkSize;
+            final read = await handle.readInto(buffer, 0, wanted);
+            if (read <= 0) break;
+            builder.add(read == buffer.length ? buffer : Uint8List.view(buffer.buffer, 0, read));
+            remaining -= read;
+          }
+        }
+      } finally {
+        try {
+          await handle.close();
+        } catch (_) {
+          // ignore
         }
       }
-      await handle.close();
       return builder.takeBytes();
     });
   }

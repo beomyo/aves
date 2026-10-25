@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -9,6 +10,15 @@ import 'package:collection/collection.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:xml/xml.dart';
+
+// a network level failure (as opposed to a server response): these are the ones
+// worth a retry, because the usual cause is a pooled keep-alive connection the
+// server already closed, and a fresh attempt succeeds at once
+class _TransportError implements Exception {
+  final Object cause;
+
+  const new(this.cause);
+}
 
 class WebDavClient implements CloudClient {
   static const _propfindBody =
@@ -22,7 +32,7 @@ class WebDavClient implements CloudClient {
       '</D:prop>'
       '</D:propfind>';
 
-  static const _listTimeout = Duration(seconds: 90);
+  static const _listTimeout = Duration(seconds: 45);
   static const _getTimeout = Duration(seconds: 120);
   static const _deleteTimeout = Duration(seconds: 120);
 
@@ -38,18 +48,48 @@ class WebDavClient implements CloudClient {
       url = '$url/';
     }
     baseUri = Uri.parse(url);
+    // an explicit HTTP client, so that an unreachable host or a half open
+    // connection cannot hold a request open for minutes, and so that pooled
+    // connections are dropped early (reusing one the server already closed is
+    // the usual reason a request hangs instead of failing)
+    final httpClient = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20)
+      ..idleTimeout = const Duration(seconds: 8);
     if (server.ignoreTlsErrors) {
-      final httpClient = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 20)
-        ..badCertificateCallback = ((cert, host, port) => true);
-      _client = IOClient(httpClient);
-    } else {
-      _client = http.Client();
+      httpClient.badCertificateCallback = ((cert, host, port) => true);
     }
+    _client = IOClient(httpClient);
   }
 
   @override
   void close() => _client.close();
+
+  // retries a network level failure once: the first attempt may have used a
+  // stale pooled connection, the second one opens a fresh one
+  Future<T> _withRetry<T>(Future<T> Function() action) async {
+    try {
+      return await action();
+    } on _TransportError {
+      try {
+        return await action();
+      } on _TransportError catch (retryError) {
+        throw CloudException(_describeTransport(retryError.cause));
+      } on CloudAbortException {
+        rethrow;
+      } on CloudException {
+        rethrow;
+      } catch (retryError) {
+        throw CloudException('request failed: $retryError');
+      }
+    }
+  }
+
+  static String _describeTransport(Object error) {
+    if (error is SocketException) return 'connection failed: ${error.message}';
+    if (error is HandshakeException) return 'TLS handshake failed: ${error.message}';
+    if (error is TimeoutException) return 'the server did not respond in time';
+    return 'connection failed: $error';
+  }
 
   @override
   Map<String, String> get requestHeaders {
@@ -72,7 +112,8 @@ class WebDavClient implements CloudClient {
   @override
   Future<List<CloudResource>> list(String url) async {
     final requestUrl = resolve(url);
-    final request = http.Request('PROPFIND', requestUrl)
+    // a request object can only be finalized once, so a retry needs a fresh one
+    http.Request build() => http.Request('PROPFIND', requestUrl)
       ..headers.addAll({
         ...requestHeaders,
         'Depth': '1',
@@ -80,46 +121,77 @@ class WebDavClient implements CloudClient {
       })
       ..bodyBytes = utf8.encode(_propfindBody);
 
-    final body = await _send(request, timeout: _listTimeout);
+    final body = await _send(build, timeout: _listTimeout);
     return _parseMultiStatus(body, requestUrl.path, baseUri);
   }
 
   @override
-  Future<Uint8List> getBytes(String url) async {
+  Future<Uint8List> getBytes(String url, {CloudAbort? abort}) {
     final requestUrl = resolve(url);
+    // the deadline aborts the transfer itself, not only the future waiting on
+    // it: a stalled body used to keep its connection for the full timeout
+    final deadline = CloudAbort();
+    final timer = Timer(_getTimeout, deadline.abort);
+    return _withRetry(() => _download(requestUrl, abort, deadline)).whenComplete(timer.cancel);
+  }
+
+  Future<Uint8List> _download(Uri requestUrl, CloudAbort? caller, CloudAbort deadline) async {
+    final request = http.Request('GET', requestUrl)..headers.addAll(requestHeaders);
+    http.StreamedResponse response;
     try {
-      final response = await _client.get(requestUrl, headers: requestHeaders).timeout(_getTimeout);
-      if (response.statusCode >= 400) {
-        throw CloudException('failed to download file', statusCode: response.statusCode);
-      }
-      return response.bodyBytes;
+      response = await _client.send(request).timeout(_getTimeout);
     } on SocketException catch (e) {
-      throw CloudException('connection failed: ${e.message}');
+      throw _TransportError(e);
     } on HandshakeException catch (e) {
-      throw CloudException('TLS handshake failed: ${e.message}');
-    } on Exception catch (e) {
-      throw CloudException('download failed: $e');
+      throw _TransportError(e);
+    } on HttpException catch (e) {
+      throw _TransportError(e);
+    } on http.ClientException catch (e) {
+      throw _TransportError(e);
     }
+    if (response.statusCode >= 400) {
+      throw CloudException('failed to download file', statusCode: response.statusCode);
+    }
+
+    final builder = BytesBuilder(copy: false);
+    try {
+      // leaving this loop (including by throwing) cancels the subscription,
+      // which closes the connection
+      await for (final chunk in response.stream) {
+        if ((caller?.aborted ?? false) || deadline.aborted) {
+          throw const CloudAbortException();
+        }
+        builder.add(chunk);
+      }
+    } on HttpException catch (e) {
+      throw _TransportError(e);
+    } on http.ClientException catch (e) {
+      throw _TransportError(e);
+    }
+    return builder.takeBytes();
   }
 
   @override
-  Future<void> delete(String url) async {
+  Future<void> delete(String url) {
     final requestUrl = resolve(url);
-    try {
-      final response = await _client.delete(requestUrl, headers: requestHeaders).timeout(_deleteTimeout);
+    return _withRetry(() async {
+      http.Response response;
+      try {
+        response = await _client.delete(requestUrl, headers: requestHeaders).timeout(_deleteTimeout);
+      } on SocketException catch (e) {
+        throw _TransportError(e);
+      } on HandshakeException catch (e) {
+        throw _TransportError(e);
+      } on HttpException catch (e) {
+        throw _TransportError(e);
+      } on http.ClientException catch (e) {
+        throw _TransportError(e);
+      }
       // a missing resource is already in the desired state
       if (response.statusCode >= 400 && response.statusCode != 404) {
         throw CloudException('failed to delete', statusCode: response.statusCode);
       }
-    } on CloudException {
-      rethrow;
-    } on SocketException catch (e) {
-      throw CloudException('connection failed: ${e.message}');
-    } on HandshakeException catch (e) {
-      throw CloudException('TLS handshake failed: ${e.message}');
-    } on Exception catch (e) {
-      throw CloudException('delete failed: $e');
-    }
+    });
   }
 
   // fetches only the leading bytes of a file (used to read image dimensions
@@ -154,44 +226,52 @@ class WebDavClient implements CloudClient {
     return builder.isEmpty ? null : builder.takeBytes();
   }
 
-  Future<String> _send(http.Request request, {required Duration timeout}) async {
-    http.Response response;
-    try {
-      response = await http.Response.fromStream(await _client.send(request)).timeout(timeout);
-    } on SocketException catch (e) {
-      throw CloudException('connection failed: ${e.message}');
-    } on HandshakeException catch (e) {
-      throw CloudException('TLS handshake failed: ${e.message}');
-    } on Exception catch (e) {
-      throw CloudException('request failed: $e');
-    }
-
-    // follow a single redirect if the server moved the collection
-    if (const [301, 302, 303, 307, 308].contains(response.statusCode)) {
-      final location = response.headers['location'];
-      if (location != null) {
-        final redirectRequest = http.Request(request.method, resolve(location))
-          ..headers.addAll(request.headers)
-          ..bodyBytes = request.bodyBytes;
-        response = await http.Response.fromStream(await _client.send(redirectRequest)).timeout(timeout);
+  Future<String> _send(http.Request Function() build, {required Duration timeout}) {
+    return _withRetry(() async {
+      final request = build();
+      http.Response response;
+      try {
+        response = await http.Response.fromStream(await _client.send(request)).timeout(timeout);
+      } on SocketException catch (e) {
+        throw _TransportError(e);
+      } on HandshakeException catch (e) {
+        throw _TransportError(e);
+      } on HttpException catch (e) {
+        throw _TransportError(e);
+      } on http.ClientException catch (e) {
+        throw _TransportError(e);
+      } on TimeoutException catch (e) {
+        // a half open connection never answers: a fresh attempt usually does
+        throw _TransportError(e);
       }
-    }
 
-    switch (response.statusCode) {
-      case 200:
-      case 207:
-        return response.body;
-      case 401:
-        throw const CloudException('authentication failed, check the username and password', statusCode: 401);
-      case 403:
-        throw const CloudException('access forbidden', statusCode: 403);
-      case 404:
-        throw const CloudException('path not found, the URL is likely wrong (e.g. AList uses "/dav")', statusCode: 404);
-      case 405:
-        throw const CloudException('not a WebDAV endpoint, the URL is likely wrong (e.g. AList uses "/dav")', statusCode: 405);
-      default:
-        throw CloudException('unexpected server response', statusCode: response.statusCode);
-    }
+      // follow a single redirect if the server moved the collection
+      if (const [301, 302, 303, 307, 308].contains(response.statusCode)) {
+        final location = response.headers['location'];
+        if (location != null) {
+          final redirectRequest = http.Request(request.method, resolve(location))
+            ..headers.addAll(request.headers)
+            ..bodyBytes = request.bodyBytes;
+          response = await http.Response.fromStream(await _client.send(redirectRequest)).timeout(timeout);
+        }
+      }
+
+      switch (response.statusCode) {
+        case 200:
+        case 207:
+          return response.body;
+        case 401:
+          throw const CloudException('authentication failed, check the username and password', statusCode: 401);
+        case 403:
+          throw const CloudException('access forbidden', statusCode: 403);
+        case 404:
+          throw const CloudException('path not found, the URL is likely wrong (e.g. AList uses "/dav")', statusCode: 404);
+        case 405:
+          throw const CloudException('not a WebDAV endpoint, the URL is likely wrong (e.g. AList uses "/dav")', statusCode: 405);
+        default:
+          throw CloudException('unexpected server response', statusCode: response.statusCode);
+      }
+    });
   }
 
   // `package:xml` name matching is namespace-prefix sensitive

@@ -33,16 +33,43 @@ class CloudImageLoader {
   // a thumbnail and the viewer can ask for the same file at the same time;
   // share the download instead of fetching it twice
   final Map<String, Future<Uint8List>> _inflight = {};
+  // one per download in progress, so a folder that was left stops pulling
+  // bytes instead of keeping the connection and the bandwidth for minutes
+  final Map<String, CloudAbort> _aborts = {};
+  // URLs whose cached payload failed to decode, so it is re-downloaded once
+  // but not on every retry
+  final Set<String> _decodeFailures = {};
 
   Future<Uint8List> bytesFor(String url) {
     final pending = _inflight[url];
     if (pending != null) return pending;
-    final future = _loadBytes(url);
+    final abort = CloudAbort();
+    _aborts[url] = abort;
+    final future = _loadBytes(url, abort);
     _inflight[url] = future;
-    return future.whenComplete(() => _inflight.remove(url));
+    return future.whenComplete(() {
+      // only clear our own entries: an aborted transfer completes after a new
+      // request for the same URL may already have replaced them
+      if (identical(_inflight[url], future)) _inflight.remove(url);
+      if (identical(_aborts[url], abort)) _aborts.remove(url);
+    });
   }
 
-  Future<Uint8List> _loadBytes(String url) async {
+  // drops the downloads belonging to entries the user left. The transfer is
+  // aborted at the socket level so the next folder's listing does not queue
+  // behind it. A later request for the same URL starts over.
+  void abandon(Iterable<String> urls) {
+    for (final url in urls) {
+      final abort = _aborts.remove(url);
+      if (abort == null) continue;
+      _inflight.remove(url);
+      abort.abort();
+    }
+  }
+
+  void forgetDecodeFailure(String url) => _decodeFailures.remove(url);
+
+  Future<Uint8List> _loadBytes(String url, CloudAbort abort) async {
     final cached = await cloudDiskCache.get(url);
     if (cached != null) return cached;
 
@@ -50,7 +77,7 @@ class CloudImageLoader {
     if (client == null) {
       throw CloudException('no cloud service configured for $url');
     }
-    final bytes = await client.getBytes(url);
+    final bytes = await client.getBytes(url, abort: abort);
     if (bytes.isNotEmpty) {
       await cloudDiskCache.put(url, bytes);
     }
@@ -129,7 +156,19 @@ class CloudImageLoader {
     return servicePolicy.call(
       () async {
         final bytes = await bytesFor(request.uri);
-        return decodeBounded(bytes, decoderFor(decode), maxDim);
+        try {
+          return await decodeBounded(bytes, decoderFor(decode), maxDim);
+        } catch (_) {
+          // a payload that cannot be decoded (truncated, corrupt, or a stale
+          // cache entry) would fail again from disk on every retry: drop it so
+          // the next attempt downloads it again. Only once per URL, to avoid
+          // re-downloading a format the decoder simply does not support
+          if (_decodeFailures.add(request.uri)) {
+            if (_decodeFailures.length > 500) _decodeFailures.clear();
+            await cloudDiskCache.remove(request.uri);
+          }
+          rethrow;
+        }
       },
       priority: priority ?? (extent == 0 ? ServiceCallPriority.getFastThumbnail : ServiceCallPriority.getSizedThumbnail),
       key: taskKey,
@@ -195,9 +234,14 @@ void _setVideoThumbnailGenerating(String uri, bool generating) {
 // drops the cached payload of a cloud entry (the extracted video frame and any
 // downloaded image bytes), so the next request fetches it again
 Future<void> evictCloudThumbnail(String uri) async {
+  cloudImageLoader.forgetDecodeFailure(uri);
   await cloudDiskCache.remove('${CloudAwareMediaFetchService._videoThumbnailCachePrefix}$uri');
   await cloudDiskCache.remove(uri);
 }
+
+// drops the downloads of entries the user has left (a folder change), so they
+// stop competing with the listing of the folder being opened
+void abandonCloudImages(Iterable<String> uris) => cloudImageLoader.abandon(uris);
 
 // stores a frame captured while the user was watching the video, so the grid can
 // show a thumbnail without asking the server to extract one

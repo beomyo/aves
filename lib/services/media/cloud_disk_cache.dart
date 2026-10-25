@@ -10,8 +10,11 @@ class CloudDiskCache {
   static const int _maxBytes = 256 << 20; // 256 MiB
   // trim below the limit so the directory is not rescanned on every write
   static const int _evictTargetBytes = 204 << 20; // 192 MiB
-  static const int _fnvOffset = 0x811c9dc5;
-  static const int _fnvPrime = 0x01000193;
+  // 64 bit FNV-1a: with a 32 bit key a library of a few thousand files has a
+  // measurable chance of two URLs colliding, and a collision serves one file's
+  // bytes for another (which then never decodes)
+  static const int _fnvOffset = 0xcbf29ce484222325;
+  static const int _fnvPrime = 0x100000001b3;
 
   Directory? _dir;
   // rough total of the cached files, so a write does not have to list and stat
@@ -34,9 +37,10 @@ class CloudDiskCache {
     var hash = _fnvOffset;
     for (final codeUnit in url.codeUnits) {
       hash ^= codeUnit;
-      hash = (hash * _fnvPrime) & 0xFFFFFFFF;
+      // multiplication wraps at 64 bits, which is what FNV wants
+      hash *= _fnvPrime;
     }
-    return hash.toRadixString(16).padLeft(8, '0');
+    return hash.toUnsigned(64).toRadixString(16).padLeft(16, '0');
   }
 
   Future<File> _fileFor(String url) async {

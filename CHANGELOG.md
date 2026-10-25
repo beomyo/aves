@@ -25,6 +25,20 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.16"></a>[v1.19.16] - 2026-10-25
+
+### Fixed
+
+- Cloud: a folder could take a long time to open when the previous folder was still downloading thumbnails. Every thumbnail is a full file download, and the transfers of the folder you left kept running (up to two minutes each) while the new folder's listing queued behind them. They are now aborted as soon as the folder changes, at the socket level
+- Cloud: a request sent on a pooled connection the server had already closed failed or hung until its timeout, which made a folder occasionally take much longer than the same folder in a browser. A network level failure is retried once on a fresh connection, the listing timeout is shorter, and idle connections are dropped earlier
+- Cloud: a thumbnail could stay blank until the folder was reopened. Pausing the request of a disposed tile happened asynchronously, so it could land *after* the recreated tile had already resumed the same request, leaving it paused with nobody to resume it. Pausing is now synchronous
+- Cloud: a thumbnail whose cached payload failed to decode was retried from the same broken file until it gave up, leaving an invisible tile. The payload is dropped so the retry downloads it again, a hard failure now shows the standard broken-image tile, and one more retry was added (after 90s)
+- Cloud: the thumbnail disk cache is keyed by a 64 bit hash instead of 32 bit, where a library of a few thousand files had a measurable chance of two URLs colliding and serving one file's bytes for another
+
+### Changed
+
+- Cloud: thumbnails are preloaded half a screen ahead instead of a full extra screen. Preloading a whole screen queued dozens of full file downloads the user might never look at, delaying the visible tiles and the next folder's listing
+
 ## <a id="v1.19.15"></a>[v1.19.15] - 2026-10-24
 
 ### Added
