@@ -594,5 +594,8 @@ class CloudAwareMediaFetchService implements MediaFetchService {
   bool cancelThumbnail(Object taskKey) => _delegate.cancelThumbnail(taskKey);
 
   @override
+  bool prioritizeThumbnail(Object taskKey) => _delegate.prioritizeThumbnail(taskKey);
+
+  @override
   Future<T>? resumeLoading<T>(Object taskKey) => _delegate.resumeLoading<T>(taskKey);
 }

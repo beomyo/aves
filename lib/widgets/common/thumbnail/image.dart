@@ -37,6 +37,13 @@ class const ThumbnailImage({
   // when not empty, a failed thumbnail is retried after each delay (in order)
   // instead of showing the error placeholder after the first failure
   final List<Duration> retryDelays = const [],
+  // a spinner while the thumbnail is loading. Remote thumbnails can take
+  // seconds, and a plain background gives no feedback at all
+  final bool showLoadingIndicator = false,
+  // once this widget is on screen, its queued request jumps to the front of
+  // the queue. Without it, images the user scrolled past and came back to wait
+  // behind every thumbnail requested in the meantime
+  final bool prioritizeOnVisible = false,
 }) extends StatefulWidget {
   @override
   State<ThumbnailImage> createState() => _ThumbnailImageState();
@@ -59,6 +66,9 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
   int _retryAttempt = 0;
   Timer? _retryTimer;
   ImageProvider? _failedProvider;
+  // captured from `build`, so the post frame visibility check does not need an
+  // inherited widget lookup outside of it
+  Size? _viewportSize;
 
   AvesEntry get entry => widget.entry;
 
@@ -71,6 +81,22 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
     super.initState();
     _streamListener = ImageStreamListener(_onImageLoad, onError: _onError);
     _registerWidget(widget);
+    if (widget.prioritizeOnVisible) _schedulePrioritize();
+  }
+
+  // the widget may be built ahead of the viewport (scroll cache extent), so
+  // ask after layout whether it is actually on screen
+  void _schedulePrioritize() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final size = _viewportSize;
+      final box = context.findRenderObject();
+      if (size == null || box is! RenderBox || !box.hasSize || !box.attached) return;
+      final origin = box.localToGlobal(Offset.zero);
+      final visible = origin.dy < size.height && origin.dy + box.size.height > 0 && origin.dx < size.width && origin.dx + box.size.width > 0;
+      if (!visible) return;
+      mediaFetchService.prioritizeThumbnail(entry.getThumbnail(extent: extent).key);
+    });
   }
 
   @override
@@ -250,6 +276,7 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
   @override
   Widget build(BuildContext context) {
     final animate = context.select<Settings, bool>((v) => v.animate);
+    _viewportSize = MediaQuery.sizeOf(context);
     if (!entry.isDecodingSupported || _lastException != null) {
       return widget.errorPlaceholder ?? _buildError(context, animate);
     }
@@ -283,9 +310,9 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
                 Container(
                   color: widget.showLoadingBackground ? loadingBackgroundColor(context) : Colors.transparent,
                 ),
-                // a delayed retry is pending: keep showing progress instead of
-                // a silent black tile
-                if (_retryTimer != null)
+                // a delayed retry is pending, or the thumbnail is still on its
+                // way: keep showing progress instead of a silent black tile
+                if (_retryTimer != null || widget.showLoadingIndicator)
                   const Center(
                     child: SizedBox(
                       width: 20,

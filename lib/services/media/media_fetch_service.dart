@@ -74,6 +74,10 @@ abstract class MediaFetchService {
 
   bool cancelThumbnail(Object taskKey);
 
+  // moves a queued thumbnail call to the front, for a tile that is on screen
+  // again and must not wait behind thumbnails requested while scrolling past it
+  bool prioritizeThumbnail(Object taskKey);
+
   Future<T>? resumeLoading<T>(Object taskKey);
 }
 
@@ -415,6 +419,9 @@ class PlatformMediaFetchService implements MediaFetchService {
     taskKey,
     [ServiceCallPriority.getFastThumbnail, ServiceCallPriority.getSizedThumbnail, ServiceCallPriority.getVideoThumbnail],
   );
+
+  @override
+  bool prioritizeThumbnail(Object taskKey) => servicePolicy.prioritize(taskKey);
 
   @override
   Future<T>? resumeLoading<T>(Object taskKey) => servicePolicy.resume<T>(taskKey);

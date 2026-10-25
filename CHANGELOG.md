@@ -25,6 +25,21 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.17"></a>[v1.19.17] - 2026-10-25
+
+### Added
+
+- Cloud browser: a spinner on image tiles while their thumbnail is loading, like the one videos already had
+
+### Changed
+
+- Cloud browser: after the over-scroll gesture moves to the **next folder**, going back returns to the **folder list** instead of the previous sibling folder, since moving sideways is not going a level deeper
+- Cloud browser: a thumbnail that is on screen jumps to the front of the loading queue. Images scrolled past quickly and then scrolled back to used to wait behind every thumbnail requested in the meantime, so they appeared not to load at all
+
+### Fixed
+
+- Cloud browser: a thumbnail request that is resumed (a tile coming back on screen) used to be queued last instead of first
+
 ## <a id="v1.19.16"></a>[v1.19.16] - 2026-10-25
 
 ### Fixed

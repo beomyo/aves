@@ -309,7 +309,10 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     });
   }
 
-  void _navigateTo(String rawUrl) {
+  // `lateral` marks a move to a sibling folder (the over-scroll gesture): it is
+  // not a level deeper, so going back returns to the folder list instead of the
+  // sibling that happened to be shown before
+  void _navigateTo(String rawUrl, {bool lateral = false}) {
     final url = _asFolderUrl(rawUrl);
     if (_sameFolder(url, _currentUrl)) return;
     // stop the transfers and extractions of the folder being left: they would
@@ -319,10 +322,14 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     _abandonThumbnailsSoon(leaving);
     _rememberScrollPosition();
     _resetOverscroll();
-    final existing = _trail.indexWhere((v) => _sameFolder(v, url));
+    final existing = lateral ? -1 : _trail.indexWhere((v) => _sameFolder(v, url));
     if (existing >= 0) {
       // already visited: reuse the cached listing instead of fetching it again
       _trailIndex = existing;
+    } else if (lateral) {
+      // replace the current stop instead of stacking on it
+      _trail = [..._trail.take(_trailIndex), url];
+      _trailIndex = _trail.length - 1;
     } else {
       // a genuinely new path: drop the forward entries and fetch once
       _trail = [..._trail.take(_trailIndex + 1), url];
@@ -484,7 +491,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       if (_overscroll >= _overscrollThreshold) {
         _resetOverscroll();
         HapticFeedback.mediumImpact();
-        _navigateTo(next.url);
+        _navigateTo(next.url, lateral: true);
       }
       return false;
     }
@@ -1254,6 +1261,8 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
                   progressive: entry.isVideo,
                   errorPlaceholder: entry.isVideo ? const SizedBox.shrink() : null,
                   retryDelays: _cloudThumbnailRetryDelays,
+                  showLoadingIndicator: entry.isImage,
+                  prioritizeOnVisible: true,
                   onImageInfo: (info) => _onTileImageInfo(entry, info),
                 ),
                 if (entry.isVideo) _VideoLoadingOverlay(entry.uri),
@@ -1524,6 +1533,8 @@ class _CloudTile extends StatelessWidget {
         // no `errorPlaceholder`: a tile that really cannot be loaded keeps the
         // standard broken-image look instead of becoming an invisible hole
         retryDelays: _cloudThumbnailRetryDelays,
+        showLoadingIndicator: true,
+        prioritizeOnVisible: true,
         onImageInfo: (info) => onImageInfo?.call(entry, info),
       );
     }

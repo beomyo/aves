@@ -47,7 +47,9 @@ class ServicePolicy {
         taskCompleter,
       );
     }
-    _getQueue(priority)[key] = task;
+    // a request someone asked for again (a tile that came back on screen)
+    // should not wait behind everything that was queued in the meantime
+    _enqueue(priority, key, task, front: toResume != null);
     _pickNext();
     return taskCompleter.future;
   }
@@ -57,7 +59,7 @@ class ServicePolicy {
     if (toResume != null) {
       final priority = toResume.$1;
       final task = toResume.$2 as _Task<T>;
-      _getQueue(priority)[key] = task;
+      _enqueue(priority, key, task, front: true);
       _pickNext();
       return task.completer.future;
     } else {
@@ -66,6 +68,21 @@ class ServicePolicy {
   }
 
   LinkedHashMap<Object, _Task> _getQueue(int priority) => _queues.putIfAbsent(priority, LinkedHashMap.new);
+
+  void _enqueue(int priority, Object key, _Task task, {bool front = false}) {
+    final queue = _getQueue(priority);
+    if (!front || queue.isEmpty) {
+      queue[key] = task;
+      return;
+    }
+    // `LinkedHashMap` keeps insertion order, so rebuilding it puts the task
+    // first
+    final reordered = <Object, _Task>{key: task};
+    queue.forEach((k, v) => reordered[k] = v);
+    queue
+      ..clear()
+      ..addAll(reordered);
+  }
 
   void _pickNext() {
     _notifyQueueState();
@@ -114,6 +131,20 @@ class ServicePolicy {
   }
 
   bool isPaused(Object key) => _paused.containsKey(key);
+
+  // moves a queued call to the front of its queue. Used when a tile becomes
+  // visible again: its thumbnail must not wait behind the ones that were
+  // requested earlier (e.g. while scrolling past them)
+  bool prioritize(Object key) {
+    for (final entry in _queues.entries) {
+      final task = entry.value.remove(key);
+      if (task == null) continue;
+      _enqueue(entry.key, key, task, front: true);
+      _notifyQueueState();
+      return true;
+    }
+    return false;
+  }
 
   void _notifyQueueState() {
     if (!_queueStreamController.hasListener) return;
