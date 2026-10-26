@@ -72,7 +72,11 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   final ValueNotifier<String> _error = ValueNotifier('');
   final ValueNotifier<List<CloudResource>> _folders = ValueNotifier([]);
   final ValueNotifier<List<AvesEntry>> _media = ValueNotifier([]);
-  final ScrollController _scrollController = ScrollController();
+  // recreated per folder so the saved offset applies to the first layout (see
+  // `_bindScrollController`), and swapped through `_scrollGeneration`
+  ScrollController _scrollController = ScrollController();
+  String? _scrollBoundUrl;
+  int _scrollGeneration = 0;
   final ScrollController _addressScrollController = ScrollController();
   final GlobalKey _currentCrumbKey = GlobalKey();
   final GlobalKey _addressViewportKey = GlobalKey();
@@ -285,27 +289,44 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     }
   }
 
-  void _restoreScrollPosition(String url) {
-    final target = settings.cloudFolderScroll(url);
-    if (target == null || target <= 0) {
-      _scrollTo(0, url);
-      return;
-    }
-    // the target folder's scroll extent may still be an estimate on the first
-    // frame, so retry once after the layout has settled
-    _scrollTo(target, url);
-    Timer(const Duration(milliseconds: 300), () => _scrollTo(target, url));
+  // Hands the folder's saved offset to a fresh scroll controller, and bumps the
+  // generation so the next build recreates the scroll position at that offset.
+  // Jumping after the first frame instead showed the folder at the top and then
+  // snapped to the position, which the user found jarring.
+  void _bindScrollController(String url) {
+    if (_scrollBoundUrl == url) return;
+    _scrollBoundUrl = url;
+    final target = settings.cloudFolderScroll(url) ?? 0;
+    final previous = _scrollController;
+    previous.removeListener(_onScroll);
+    _scrollController = ScrollController(initialScrollOffset: target <= 0 ? 0 : target);
+    _scrollController.addListener(_onScroll);
+    _scrollGeneration++;
+    _lastScrollPixels = target <= 0 ? 0 : target;
+    // the frame that follows rebuilds the scroll view with the new key, which
+    // detaches and disposes the previous position: the old controller can go
+    // once that happened
+    WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+    // make sure the new key is taken into account even if the content itself
+    // happens to be unchanged
+    if (mounted) setState(() {});
   }
 
-  void _scrollTo(double target, String url) {
+  // the saved offset is already applied when the position is created, so this
+  // only covers the case where the layout settled somewhere else (e.g. a very
+  // rough extent estimate on the first pass)
+  void _verifyScrollOffset(String url) {
+    final target = settings.cloudFolderScroll(url) ?? 0;
+    if (target <= 0) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || url != _currentUrl || !_scrollController.hasClients) return;
-      final max = _scrollController.position.maxScrollExtent;
-      final offset = target.clamp(0.0, max);
-      if ((_scrollController.offset - offset).abs() > 0.5) {
-        _scrollController.jumpTo(offset);
+      final position = _scrollController.position;
+      // the content is shorter than remembered: stay where the layout put us
+      if (target > position.maxScrollExtent) return;
+      if ((position.pixels - target).abs() > 0.5) {
+        _scrollController.jumpTo(target);
+        _lastScrollPixels = target;
       }
-      _lastScrollPixels = offset;
     });
   }
 
@@ -366,11 +387,12 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       _fetch();
       return;
     }
+    _bindScrollController(url);
     _state.value = _LoadState.ready;
     _folders.value = snapshot.folders;
     _media.value = snapshot.media;
     _rememberFolderList(url, snapshot.folders);
-    _restoreScrollPosition(url);
+    _verifyScrollOffset(url);
     _revealCurrentCrumb();
   }
 
@@ -542,12 +564,15 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       }
 
       _rememberSnapshot(url, _FolderSnapshot(folders, media));
+      // bind before the values, so the frame that shows the content is already
+      // laid out at the saved offset (a refresh keeps the current position)
+      if (!keepContent) _bindScrollController(url);
       _folders.value = folders;
       _media.value = media;
       _state.value = _LoadState.ready;
 
       if (!keepContent) {
-        _restoreScrollPosition(url);
+        _verifyScrollOffset(url);
       }
       _revealCurrentCrumb();
 
@@ -1005,6 +1030,9 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
           child: NotificationListener<ScrollNotification>(
             onNotification: _onScrollNotification,
             child: CustomScrollView(
+              // a new position per folder, created at that folder's saved
+              // offset instead of starting at the top and jumping
+              key: ValueKey<int>(_scrollGeneration),
               controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
               // build half a screen ahead: every remote thumbnail is a full

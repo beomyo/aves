@@ -25,6 +25,12 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.18"></a>[v1.19.18] - 2026-10-25
+
+### Fixed
+
+- Cloud browser: returning to a folder no longer shows it at the top for a moment and then jumps to the remembered position. The folder's scroll controller is now created at that offset, so the very first frame is already in place; the position was previously restored after the first frame, and a second retry 300ms later could jump again
+
 ## <a id="v1.19.17"></a>[v1.19.17] - 2026-10-25
 
 ### Added
