@@ -86,11 +86,19 @@ class CloudImageLoader {
 
   // decodes while bounding the longest side to `maxDim` (never upscaling),
   // so memory stays proportional to the tile/screen size instead of the file
-  static Future<ui.Codec> decodeBounded(Uint8List bytes, ImageDecoderCallback decode, int maxDim) async {
+  static Future<ui.Codec> decodeBounded(
+    Uint8List bytes,
+    ImageDecoderCallback decode,
+    int maxDim, {
+    void Function(int width, int height)? onDimensions,
+  }) async {
     final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
     return decode(
       buffer,
       getTargetSize: (intrinsicWidth, intrinsicHeight) {
+        if (intrinsicWidth > 0 && intrinsicHeight > 0) {
+          onDimensions?.call(intrinsicWidth, intrinsicHeight);
+        }
         final longest = math.max(intrinsicWidth, intrinsicHeight);
         if (longest <= maxDim || longest == 0) {
           return const ui.TargetImageSize();
@@ -153,11 +161,19 @@ class CloudImageLoader {
   ) {
     final extent = request.extent;
     final maxDim = thumbnailMaxDim(extent);
+    final key = CloudAwareMediaFetchService.cloudKey(taskKey ?? request);
     return servicePolicy.call(
       () async {
         final bytes = await bytesFor(request.uri);
         try {
-          return await decodeBounded(bytes, decoderFor(decode), maxDim);
+          return await decodeBounded(
+            bytes,
+            decoderFor(decode),
+            maxDim,
+            onDimensions: (width, height) {
+              settings.setCloudImageDimensions(request.uri, width, height);
+            },
+          );
         } catch (_) {
           // a payload that cannot be decoded (truncated, corrupt, or a stale
           // cache entry) would fail again from disk on every retry: drop it so
@@ -171,7 +187,7 @@ class CloudImageLoader {
         }
       },
       priority: priority ?? (extent == 0 ? ServiceCallPriority.getFastThumbnail : ServiceCallPriority.getSizedThumbnail),
-      key: taskKey,
+      key: key,
     );
   }
 
@@ -587,15 +603,17 @@ class CloudAwareMediaFetchService implements MediaFetchService {
   @override
   Future<void> clearImageMemoryCache() => _delegate.clearImageMemoryCache();
 
+  static Object cloudKey(Object key) => (key is ThumbnailProviderKey && isCloudUri(key.uri)) ? key.uri : key;
+
   @override
   bool cancelRegion(Object taskKey) => _delegate.cancelRegion(taskKey);
 
   @override
-  bool cancelThumbnail(Object taskKey) => _delegate.cancelThumbnail(taskKey);
+  bool cancelThumbnail(Object taskKey) => _delegate.cancelThumbnail(cloudKey(taskKey));
 
   @override
-  bool prioritizeThumbnail(Object taskKey) => _delegate.prioritizeThumbnail(taskKey);
+  bool prioritizeThumbnail(Object taskKey) => _delegate.prioritizeThumbnail(cloudKey(taskKey));
 
   @override
-  Future<T>? resumeLoading<T>(Object taskKey) => _delegate.resumeLoading<T>(taskKey);
+  Future<T>? resumeLoading<T>(Object taskKey) => _delegate.resumeLoading<T>(cloudKey(taskKey));
 }

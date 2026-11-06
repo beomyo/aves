@@ -205,6 +205,11 @@ class CloudViewOptionsSheet extends StatelessWidget {
           value: settings.cloudShowSizes,
           onChanged: (v) => settings.cloudShowSizes = v,
         ),
+        SwitchListTile(
+          title: Text(l10n.cloudShowDimensions),
+          value: settings.cloudShowDimensions,
+          onChanged: (v) => settings.cloudShowDimensions = v,
+        ),
         const Divider(height: 24),
         SwitchListTile(
           title: Text(l10n.cloudViewerThumbnails),

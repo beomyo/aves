@@ -25,6 +25,22 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.19"></a>[v1.19.19] - 2026-11-06
+
+### Added
+
+- Cloud browser: option to display image dimensions on tiles and list items alongside file size and filename
+- Cloud viewer: video-like scrubber progress bar with current/total counter (e.g. 1/123) for quickly jumping across images
+
+### Changed
+
+- Cloud viewer: allow single-finger dragging and panning when zoomed in
+- Cloud browser: prevent continuous pull-down overscroll from immediately triggering the next sibling folder's progress bar before releasing touch
+
+### Fixed
+
+- Cloud browser: fix mosaic thumbnails hanging on loading spinner due to extent-mismatched task keys and unresumed paused tasks during layout recalibration
+
 ## <a id="v1.19.18"></a>[v1.19.18] - 2026-10-25
 
 ### Fixed

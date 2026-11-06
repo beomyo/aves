@@ -106,6 +106,9 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
       _unregisterWidget(oldWidget);
       _registerWidget(widget);
     }
+    if (widget.prioritizeOnVisible && _lastImageInfo == null) {
+      _schedulePrioritize();
+    }
   }
 
   @override

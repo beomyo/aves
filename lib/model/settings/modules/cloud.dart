@@ -31,6 +31,7 @@ mixin CloudSettings on SettingsAccess {
     _folderLayoutsCache = null;
     _visitedLookup = null;
     _videoPositionsCache = null;
+    _imageDimensionsCache = null;
     _folderStatsCache = null;
     _folderStatsFlushTimer?.cancel();
     _folderStatsFlushTimer = null;
@@ -48,6 +49,7 @@ mixin CloudSettings on SettingsAccess {
   Map<String, String>? _folderLayoutsCache;
   Set<String>? _visitedLookup;
   Map<String, (int, int)>? _videoPositionsCache;
+  Map<String, (int, int)>? _imageDimensionsCache;
   Map<String, double>? _scrollPositionsCache;
   Timer? _scrollPositionsFlushTimer;
   bool _scrollPositionsDirty = false;
@@ -154,6 +156,10 @@ mixin CloudSettings on SettingsAccess {
   bool get cloudShowSizes => getBool(SettingKeys.cloudShowSizesKey) ?? false;
 
   set cloudShowSizes(bool newValue) => set(SettingKeys.cloudShowSizesKey, newValue);
+
+  bool get cloudShowDimensions => getBool(SettingKeys.cloudShowDimensionsKey) ?? false;
+
+  set cloudShowDimensions(bool newValue) => set(SettingKeys.cloudShowDimensionsKey, newValue);
 
   // show the thumbnail strip at the bottom of the image viewer
   bool get cloudViewerThumbnails => getBool(SettingKeys.cloudViewerThumbnailsKey) ?? true;
@@ -633,6 +639,36 @@ mixin CloudSettings on SettingsAccess {
     final capped = entries.length > 4000 ? entries.sublist(entries.length - 4000) : entries;
     _videoPositionsCache = Map.fromEntries(capped);
     set(SettingKeys.cloudVideoPositionsKey, [for (final e in capped) '${e.key}\t${e.value.$1}\t${e.value.$2}']);
+  }
+
+  Map<String, (int, int)> get _cloudImageDimensions {
+    final cached = _imageDimensionsCache;
+    if (cached != null) return cached;
+    final stored = getStringList(SettingKeys.cloudImageDimensionsKey) ?? const [];
+    final map = <String, (int, int)>{};
+    for (final entry in stored) {
+      final parts = entry.split('\t');
+      if (parts.length < 3) continue;
+      final w = int.tryParse(parts[parts.length - 2]);
+      final h = int.tryParse(parts[parts.length - 1]);
+      if (w == null || h == null) continue;
+      map[parts.sublist(0, parts.length - 2).join('\t')] = (w, h);
+    }
+    return _imageDimensionsCache = map;
+  }
+
+  (int, int)? cloudImageDimensions(String url) => _cloudImageDimensions[url];
+
+  void setCloudImageDimensions(String url, int width, int height) {
+    if (url.isEmpty || width <= 0 || height <= 0) return;
+    final map = _cloudImageDimensions;
+    final current = map[url];
+    if (current != null && current.$1 == width && current.$2 == height) return;
+    map[url] = (width, height);
+    final entries = map.entries.toList();
+    final capped = entries.length > 4000 ? entries.sublist(entries.length - 4000) : entries;
+    _imageDimensionsCache = Map.fromEntries(capped);
+    set(SettingKeys.cloudImageDimensionsKey, [for (final e in capped) '${e.key}\t${e.value.$1}\t${e.value.$2}']);
   }
 
   // last opened location, to restore the page on the next launch

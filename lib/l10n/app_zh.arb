@@ -817,6 +817,7 @@
     "cloudDefaultVideo": "视频",
     "cloudLayoutPerFolder": "单独记住每个文件夹的视图",
     "cloudShowFileSizes": "显示文件大小",
+    "cloudShowDimensions": "显示图片尺寸",
     "cloudViewerThumbnails": "图片浏览器缩略图条",
     "cloudShowVideoThumbnails": "自动提取视频缩略图",
     "cloudShowVideoDuration": "显示视频时长",

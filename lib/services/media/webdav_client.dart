@@ -156,13 +156,19 @@ class WebDavClient implements CloudClient {
     final builder = BytesBuilder(copy: false);
     try {
       // leaving this loop (including by throwing) cancels the subscription,
-      // which closes the connection
-      await for (final chunk in response.stream) {
+      // which closes the connection; timeout on chunks prevents silent socket stall
+      await for (final chunk in response.stream.timeout(const Duration(seconds: 30))) {
         if ((caller?.aborted ?? false) || deadline.aborted) {
           throw const CloudAbortException();
         }
         builder.add(chunk);
       }
+    } on TimeoutException catch (e) {
+      throw _TransportError(e);
+    } on SocketException catch (e) {
+      throw _TransportError(e);
+    } on HandshakeException catch (e) {
+      throw _TransportError(e);
     } on HttpException catch (e) {
       throw _TransportError(e);
     } on http.ClientException catch (e) {

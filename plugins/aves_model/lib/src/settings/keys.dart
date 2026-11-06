@@ -178,6 +178,8 @@ class SettingKeys {
   static const cloudMediaFilterKey = 'cloud_media_filter';
   static const cloudShowNamesKey = 'cloud_show_names';
   static const cloudShowSizesKey = 'cloud_show_sizes';
+  static const cloudShowDimensionsKey = 'cloud_show_dimensions';
+  static const cloudImageDimensionsKey = 'cloud_image_dimensions';
   static const cloudImmersiveKey = 'cloud_immersive';
   static const cloudViewerThumbnailsKey = 'cloud_viewer_thumbnails';
   static const cloudSortKey = 'cloud_sort';

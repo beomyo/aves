@@ -1214,6 +1214,7 @@
   "cloudDefaultVideo": "Videos",
   "cloudLayoutPerFolder": "Remember layout per folder",
   "cloudShowFileSizes": "Show file sizes",
+  "cloudShowDimensions": "Show image dimensions",
   "cloudViewerThumbnails": "Thumbnail strip in the viewer",
   "cloudShowVideoThumbnails": "Extract video thumbnails",
   "cloudShowVideoDuration": "Show video duration",

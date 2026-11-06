@@ -104,6 +104,8 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   Timer? _overscrollTimer;
   double _overscroll = 0;
   double _overscrollThreshold = 0;
+  bool _overscrollLocked = false;
+  int _pointerCount = 0;
 
   // immersive: hide the app bar while scrolling down
   bool _immersive = false;
@@ -494,7 +496,14 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
 
   bool _onScrollNotification(ScrollNotification notification) {
     if (notification.depth != 0) return false;
+    if (notification is ScrollEndNotification) {
+      _overscrollLocked = false;
+    }
+    if (notification is UserScrollNotification && notification.direction == ScrollDirection.idle) {
+      _overscrollLocked = false;
+    }
     if (notification is OverscrollNotification && notification.metrics.axis == Axis.vertical) {
+      if (_overscrollLocked) return false;
       if (_resolvedLayout(_media.value) != 'mosaic') return false;
       if (notification.metrics.extentAfter > 0 || notification.overscroll <= 0) return false;
       final next = _nextFolderInParent();
@@ -512,6 +521,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       _overscrollTimer = Timer(const Duration(milliseconds: 700), _resetOverscroll);
       if (_overscroll >= _overscrollThreshold) {
         _resetOverscroll();
+        _overscrollLocked = true;
         HapticFeedback.mediumImpact();
         _navigateTo(next.url, lateral: true);
       }
@@ -773,7 +783,14 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     });
   }
 
-  double _aspectOf(AvesEntry entry) => (entry.isVideo ? (_aspects[entry.uri] ?? 16 / 9) : (_aspects[entry.uri] ?? 1.0)).clamp(0.35, 2.6);
+  double _aspectOf(AvesEntry entry) {
+    final cached = _aspects[entry.uri];
+    if (cached != null) return cached.clamp(0.35, 2.6);
+    if (entry.width > 0 && entry.height > 0) {
+      return (entry.width / entry.height).clamp(0.35, 2.6);
+    }
+    return (entry.isVideo ? (16 / 9) : 1.0).clamp(0.35, 2.6);
+  }
 
   void _onScaleStart(ScaleStartDetails details) {
     _scaleStartColumns = settings.cloudColumns;
@@ -790,6 +807,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   }
 
   AvesEntry _entryFromResource(CloudResource resource, String mimeType, int id) {
+    final dim = settings.cloudImageDimensions(resource.url);
     return AvesEntry(
       id: id,
       uri: resource.url,
@@ -799,8 +817,8 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
       contentId: null,
       pageId: null,
       sourceMimeType: mimeType,
-      width: 0,
-      height: 0,
+      width: dim?.$1 ?? 0,
+      height: dim?.$2 ?? 0,
       sourceRotationDegrees: 0,
       sizeBytes: resource.sizeBytes,
       sourceTitle: resource.name,
@@ -921,6 +939,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     final mediaFilter = context.select<Settings, String>((s) => s.cloudMediaFilter);
     final showNames = context.select<Settings, bool>((s) => s.cloudShowNames);
     final showSizes = context.select<Settings, bool>((s) => s.cloudShowSizes);
+    final showDimensions = context.select<Settings, bool>((s) => s.cloudShowDimensions);
     final immersiveEnabled = context.select<Settings, bool>((s) => s.cloudImmersive);
     // a folder holding only videos (or the "videos only" filter) uses the video
     // default layout, everything else the image default
@@ -989,16 +1008,26 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
         if (sortedFolders.isNotEmpty) _buildFolderSliver(context, sortedFolders),
         if (sortedVisible.isNotEmpty)
           if (layout == 'mosaic')
-            ..._buildMosaicSlivers(context, sortedVisible, columns, showNames, showSizes)
+            ..._buildMosaicSlivers(context, sortedVisible, columns, showNames, showSizes, showDimensions)
           else if (layout == 'list')
-            _buildListSliver(context, sortedVisible, showNames, showSizes)
+            _buildListSliver(context, sortedVisible, showNames, showSizes, showDimensions)
           else
-            _buildGridSliver(context, sortedVisible, columns, showNames, showSizes),
+            _buildGridSliver(context, sortedVisible, columns, showNames, showSizes, showDimensions),
         const SliverToBoxAdapter(child: SizedBox(height: 8)),
       ];
     }
 
-    return RawGestureDetector(
+    return Listener(
+      onPointerDown: (_) => _pointerCount++,
+      onPointerUp: (_) {
+        _pointerCount = math.max(0, _pointerCount - 1);
+        if (_pointerCount == 0) _overscrollLocked = false;
+      },
+      onPointerCancel: (_) {
+        _pointerCount = math.max(0, _pointerCount - 1);
+        if (_pointerCount == 0) _overscrollLocked = false;
+      },
+      child: RawGestureDetector(
       gestures: {
         EagerScaleGestureRecognizer: GestureRecognizerFactoryWithHandlers<EagerScaleGestureRecognizer>(
           () => EagerScaleGestureRecognizer(debugOwner: this),
@@ -1046,6 +1075,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
               ],
             ),
           ),
+        ),
         ),
       ),
     );
@@ -1216,10 +1246,12 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
   // a thumbnail decoded: remember the aspect ratio for the mosaic layout and,
   // for images, count the picture as loaded in its folder progress
   void _onTileImageInfo(AvesEntry entry, ImageInfo info) {
-    final image = info.image;
-    final width = image.width;
-    final height = image.height;
+    final dim = settings.cloudImageDimensions(entry.uri);
+    final width = dim?.$1 ?? info.image.width;
+    final height = dim?.$2 ?? info.image.height;
     if (width > 0 && height > 0) {
+      entry.width = width;
+      entry.height = height;
       _onTileAspect(entry.uri, width / height);
     }
     if (entry.isImage) {
@@ -1257,7 +1289,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     return [...entries]..sort(compare);
   }
 
-  Widget _buildListSliver(BuildContext context, List<AvesEntry> entries, bool showNames, bool showSizes) {
+  Widget _buildListSliver(BuildContext context, List<AvesEntry> entries, bool showNames, bool showSizes, bool showDimensions) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final showVideoDuration = context.select<Settings, bool>((s) => s.cloudVideoDurationVisible);
     final showVideoPlayIcon = context.select<Settings, bool>((s) => s.cloudVideoPlayIcon);
@@ -1268,8 +1300,9 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
         final watched = entry.isVideo && settings.isCloudVisited(entry.uri);
         final sizeBytes = entry.sizeBytes;
         final sizeText = (showSizes && sizeBytes != null) ? formatFileSize(settings.avesLocale, sizeBytes, round: 0) : null;
+        final dimensionText = (showDimensions && entry.width > 0 && entry.height > 0) ? '${entry.width} × ${entry.height}' : null;
         final durationText = _cloudVideoDurationText(entry, visible: showVideoDuration);
-        final subtitleText = [?sizeText, ?durationText].join('  ·  ');
+        final subtitleText = [?sizeText, ?dimensionText, ?durationText].join('  ·  ');
         return ListTile(
           leading: SizedBox(
             width: 56,
@@ -1310,7 +1343,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     );
   }
 
-  Widget _buildGridSliver(BuildContext context, List<AvesEntry> entries, double columns, bool showNames, bool showSizes) {
+  Widget _buildGridSliver(BuildContext context, List<AvesEntry> entries, double columns, bool showNames, bool showSizes, bool showDimensions) {
     final crossAxisCount = columns.round().clamp(1, 10);
     final width = MediaQuery.sizeOf(context).width;
     final dpr = MediaQuery.devicePixelRatioOf(context);
@@ -1331,6 +1364,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
           devicePixelRatio: dpr,
           showName: showNames,
           showSize: showSizes,
+          showDimensions: showDimensions,
           watched: entry.isVideo && settings.isCloudVisited(entry.uri),
           progress: _progressOf(entry),
           onImageInfo: _onTileImageInfo,
@@ -1341,7 +1375,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
     );
   }
 
-  List<Widget> _buildMosaicSlivers(BuildContext context, List<AvesEntry> entries, double columns, bool showNames, bool showSizes) {
+  List<Widget> _buildMosaicSlivers(BuildContext context, List<AvesEntry> entries, double columns, bool showNames, bool showSizes, bool showDimensions) {
     final width = MediaQuery.sizeOf(context).width;
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final targetHeight = width / columns;
@@ -1390,6 +1424,7 @@ class _CloudBrowserPageState extends State<CloudBrowserPage> {
                     devicePixelRatio: dpr,
                     showName: showNames,
                     showSize: showSizes,
+                    showDimensions: showDimensions,
                     watched: entries[indices[k]].isVideo && settings.isCloudVisited(entries[indices[k]].uri),
                     progress: _progressOf(entries[indices[k]]),
                     isMosaic: true,
@@ -1489,6 +1524,7 @@ class _CloudTile extends StatelessWidget {
   final bool isMosaic;
   final bool showName;
   final bool showSize;
+  final bool showDimensions;
   final bool watched;
   final double? progress;
   final VoidCallback onTap;
@@ -1505,6 +1541,7 @@ class _CloudTile extends StatelessWidget {
     this.isMosaic = false,
     this.showName = false,
     this.showSize = false,
+    this.showDimensions = false,
     this.watched = false,
     this.progress,
     this.onImageInfo,
@@ -1570,9 +1607,11 @@ class _CloudTile extends StatelessWidget {
     if (watched) {
       content = Opacity(opacity: 0.55, child: content);
     }
-    if (showName || showSize) {
+    if (showName || showSize || showDimensions) {
       final sizeBytes = entry.sizeBytes;
       final sizeText = (showSize && sizeBytes != null) ? formatFileSize(settings.avesLocale, sizeBytes, round: 0) : null;
+      final dimensionText = (showDimensions && entry.width > 0 && entry.height > 0) ? '${entry.width} × ${entry.height}' : null;
+      final detailsText = [?sizeText, ?dimensionText].join('  ·  ');
       final nameText = showName ? (entry.sourceTitle ?? entry.bestTitle ?? '') : null;
       content = Stack(
         fit: StackFit.expand,
@@ -1601,9 +1640,9 @@ class _CloudTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(color: Colors.white, fontSize: 11),
                     ),
-                  if (sizeText != null)
+                  if (detailsText.isNotEmpty)
                     Text(
-                      sizeText,
+                      detailsText,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(color: Colors.white70, fontSize: 10),

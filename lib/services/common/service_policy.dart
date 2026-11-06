@@ -136,6 +136,12 @@ class ServicePolicy {
   // visible again: its thumbnail must not wait behind the ones that were
   // requested earlier (e.g. while scrolling past them)
   bool prioritize(Object key) {
+    final toResume = _paused.remove(key);
+    if (toResume != null) {
+      _enqueue(toResume.$1, key, toResume.$2, front: true);
+      _pickNext();
+      return true;
+    }
     for (final entry in _queues.entries) {
       final task = entry.value.remove(key);
       if (task == null) continue;

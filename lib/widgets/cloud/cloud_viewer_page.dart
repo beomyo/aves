@@ -7,6 +7,7 @@ import 'package:aves/theme/icons.dart';
 import 'package:aves/widgets/common/basic/scaffold.dart';
 import 'package:aves/widgets/common/extensions/build_context.dart';
 import 'package:aves/widgets/common/thumbnail/image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 class CloudViewerPage extends StatefulWidget {
@@ -118,16 +119,30 @@ class _CloudViewerPageState extends State<CloudViewerPage> {
               ),
             ),
           ),
-          if (showStrip)
+          if (showStrip || entries.length > 1)
             Positioned(
               left: 0,
               right: 0,
               bottom: 0,
               child: Container(
-                height: _stripHeight + MediaQuery.paddingOf(context).bottom,
                 padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
                 color: const Color(0xCC000000),
-                child: _ThumbnailStrip(entries: entries, index: _indexNotifier, onTap: _goTo),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (entries.length > 1)
+                      _ImageProgressBar(
+                        count: entries.length,
+                        index: _indexNotifier,
+                        onIndexChanged: _goTo,
+                      ),
+                    if (showStrip)
+                      SizedBox(
+                        height: _stripHeight,
+                        child: _ThumbnailStrip(entries: entries, index: _indexNotifier, onTap: _goTo),
+                      ),
+                  ],
+                ),
               ),
             ),
         ],
@@ -205,7 +220,13 @@ class _RemoteImagePageState extends State<_RemoteImagePage> with SingleTickerPro
   void _onTransformChanged() {
     final zoomed = _transformationController.value.getMaxScaleOnAxis() > 1.01;
     if (zoomed != _zoomed) {
-      _zoomed = zoomed;
+      if (mounted) {
+        setState(() {
+          _zoomed = zoomed;
+        });
+      } else {
+        _zoomed = zoomed;
+      }
       _notify();
     }
   }
@@ -379,6 +400,86 @@ class _ThumbnailStripState extends State<_ThumbnailStrip> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ImageProgressBar extends StatefulWidget {
+  final int count;
+  final ValueListenable<int> index;
+  final ValueChanged<int> onIndexChanged;
+
+  const new({
+    required this.count,
+    required this.index,
+    required this.onIndexChanged,
+  });
+
+  @override
+  State<_ImageProgressBar> createState() => _ImageProgressBarState();
+}
+
+class _ImageProgressBarState extends State<_ImageProgressBar> {
+  static const _textStyle = TextStyle(
+    color: Colors.white70,
+    fontSize: 12,
+    fontFeatures: [FontFeature.tabularFigures()],
+  );
+  int? _dragIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.count <= 1) return const SizedBox.shrink();
+
+    return ValueListenableBuilder<int>(
+      valueListenable: widget.index,
+      builder: (context, index, child) {
+        final current = (_dragIndex ?? index).clamp(0, widget.count - 1);
+        final max = (widget.count - 1).toDouble();
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 3,
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                    tickMarkShape: SliderTickMarkShape.noTickMark,
+                    activeTrackColor: Colors.white,
+                    inactiveTrackColor: Colors.white24,
+                    thumbColor: Colors.white,
+                    overlayColor: Colors.white24,
+                  ),
+                  child: Slider(
+                    value: current.toDouble().clamp(0.0, max),
+                    min: 0,
+                    max: max,
+                    divisions: widget.count - 1,
+                    onChanged: (v) {
+                      final target = v.round().clamp(0, widget.count - 1);
+                      if (target != _dragIndex) {
+                        setState(() => _dragIndex = target);
+                        widget.onIndexChanged(target);
+                      }
+                    },
+                    onChangeEnd: (v) {
+                      final target = v.round().clamp(0, widget.count - 1);
+                      widget.onIndexChanged(target);
+                      setState(() => _dragIndex = null);
+                    },
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text('${current + 1}/${widget.count}', style: _textStyle),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
