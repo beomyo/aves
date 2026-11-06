@@ -217,6 +217,11 @@ class CloudViewOptionsSheet extends StatelessWidget {
           onChanged: (v) => settings.cloudViewerThumbnails = v,
         ),
         SwitchListTile(
+          title: Text(l10n.cloudViewerProgressBar),
+          value: settings.cloudViewerProgressBar,
+          onChanged: (v) => settings.cloudViewerProgressBar = v,
+        ),
+        SwitchListTile(
           title: Text(l10n.webdavImmersive),
           value: settings.cloudImmersive,
           onChanged: (v) => settings.cloudImmersive = v,

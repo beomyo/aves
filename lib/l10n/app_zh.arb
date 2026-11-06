@@ -819,6 +819,7 @@
     "cloudShowFileSizes": "显示文件大小",
     "cloudShowDimensions": "显示图片尺寸",
     "cloudViewerThumbnails": "图片浏览器缩略图条",
+    "cloudViewerProgressBar": "图片浏览器进度条",
     "cloudShowVideoThumbnails": "自动提取视频缩略图",
     "cloudShowVideoDuration": "显示视频时长",
     "cloudShowVideoPlayIcon": "显示播放图标",

@@ -25,6 +25,12 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.20"></a>[v1.19.20] - 2026-11-06
+
+### Added
+
+- Cloud viewer: button in the top bar and setting to toggle the bottom scrubber progress bar
+
 ## <a id="v1.19.19"></a>[v1.19.19] - 2026-11-06
 
 ### Added

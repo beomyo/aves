@@ -166,6 +166,11 @@ mixin CloudSettings on SettingsAccess {
 
   set cloudViewerThumbnails(bool newValue) => set(SettingKeys.cloudViewerThumbnailsKey, newValue);
 
+  // show the scrubber progress bar at the bottom of the image viewer
+  bool get cloudViewerProgressBar => getBool(SettingKeys.cloudViewerProgressBarKey) ?? true;
+
+  set cloudViewerProgressBar(bool newValue) => set(SettingKeys.cloudViewerProgressBarKey, newValue);
+
   // hide the app bar, address bar and layout bar while scrolling down
   bool get cloudImmersive => getBool(SettingKeys.cloudImmersiveKey) ?? true;
 

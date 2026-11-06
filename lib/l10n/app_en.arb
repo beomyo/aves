@@ -1216,6 +1216,7 @@
   "cloudShowFileSizes": "Show file sizes",
   "cloudShowDimensions": "Show image dimensions",
   "cloudViewerThumbnails": "Thumbnail strip in the viewer",
+  "cloudViewerProgressBar": "Progress bar in the viewer",
   "cloudShowVideoThumbnails": "Extract video thumbnails",
   "cloudShowVideoDuration": "Show video duration",
   "cloudShowVideoPlayIcon": "Show play icon",

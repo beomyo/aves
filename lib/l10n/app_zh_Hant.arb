@@ -1046,6 +1046,7 @@
     "cloudShowFileSizes": "顯示檔案大小",
     "cloudShowDimensions": "顯示圖片尺寸",
     "cloudViewerThumbnails": "圖片檢視器縮圖列",
+    "cloudViewerProgressBar": "圖片檢視器進度條",
     "cloudShowVideoThumbnails": "自動擷取影片縮圖",
     "cloudShowVideoDuration": "顯示影片長度",
     "cloudShowVideoPlayIcon": "顯示播放圖示",

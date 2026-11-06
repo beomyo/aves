@@ -65,6 +65,7 @@ class _CloudViewerPageState extends State<CloudViewerPage> {
       return const AvesScaffold(backgroundColor: Colors.black);
     }
     final showStrip = settings.cloudViewerThumbnails;
+    final showProgressBar = settings.cloudViewerProgressBar;
 
     return AvesScaffold(
       backgroundColor: Colors.black,
@@ -109,6 +110,13 @@ class _CloudViewerPageState extends State<CloudViewerPage> {
                       style: const TextStyle(color: Colors.white, fontSize: 14),
                     ),
                   ),
+                  if (entries.length > 1)
+                    IconButton(
+                      tooltip: context.l10n.cloudViewerProgressBar,
+                      color: Colors.white,
+                      icon: Icon(showProgressBar ? Icons.linear_scale : Icons.linear_scale_outlined),
+                      onPressed: () => setState(() => settings.cloudViewerProgressBar = !showProgressBar),
+                    ),
                   IconButton(
                     tooltip: context.l10n.cloudViewerThumbnails,
                     color: Colors.white,
@@ -119,7 +127,7 @@ class _CloudViewerPageState extends State<CloudViewerPage> {
               ),
             ),
           ),
-          if (showStrip || entries.length > 1)
+          if (showStrip || (showProgressBar && entries.length > 1))
             Positioned(
               left: 0,
               right: 0,
@@ -130,7 +138,7 @@ class _CloudViewerPageState extends State<CloudViewerPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (entries.length > 1)
+                    if (showProgressBar && entries.length > 1)
                       _ImageProgressBar(
                         count: entries.length,
                         index: _indexNotifier,
