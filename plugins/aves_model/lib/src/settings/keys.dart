@@ -182,7 +182,10 @@ class SettingKeys {
   static const cloudImageDimensionsKey = 'cloud_image_dimensions';
   static const cloudImmersiveKey = 'cloud_immersive';
   static const cloudViewerThumbnailsKey = 'cloud_viewer_thumbnails';
+  static const cloudViewerThumbnailsPositionKey = 'cloud_viewer_thumbnails_position';
   static const cloudViewerProgressBarKey = 'cloud_viewer_progress_bar';
+  static const cloudViewerProgressBarPositionKey = 'cloud_viewer_progress_bar_position';
+  static const cloudViewerLayoutModeKey = 'cloud_viewer_layout_mode';
   static const cloudSortKey = 'cloud_sort';
   static const cloudVisitedFoldersKey = 'cloud_visited_folders';
   static const cloudVideoPositionsKey = 'cloud_video_positions';

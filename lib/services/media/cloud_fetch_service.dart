@@ -176,13 +176,8 @@ class CloudImageLoader {
           );
         } catch (_) {
           // a payload that cannot be decoded (truncated, corrupt, or a stale
-          // cache entry) would fail again from disk on every retry: drop it so
-          // the next attempt downloads it again. Only once per URL, to avoid
-          // re-downloading a format the decoder simply does not support
-          if (_decodeFailures.add(request.uri)) {
-            if (_decodeFailures.length > 500) _decodeFailures.clear();
-            await cloudDiskCache.remove(request.uri);
-          }
+          // cache entry) must be dropped so the next attempt downloads it again
+          await cloudDiskCache.remove(request.uri);
           rethrow;
         }
       },

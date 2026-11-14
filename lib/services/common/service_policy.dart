@@ -24,9 +24,34 @@ class ServicePolicy {
     int priority = ServiceCallPriority.normal,
     Object? key,
   }) {
+    key ??= platformCall.hashCode;
+
+    // 1. If this exact key is already running, chain to its future
+    final running = _runningQueue[key];
+    if (running != null) {
+      final taskCompleter = Completer<T>();
+      (running.completer.future as Future<T>).then(
+        taskCompleter.complete,
+        onError: taskCompleter.completeError,
+      );
+      return taskCompleter.future;
+    }
+
+    // 2. If this exact key is already queued, chain to the existing queued task
+    for (final queue in _queues.values) {
+      final existing = queue[key];
+      if (existing != null) {
+        final taskCompleter = Completer<T>();
+        (existing.completer.future as Future<T>).then(
+          taskCompleter.complete,
+          onError: taskCompleter.completeError,
+        );
+        return taskCompleter.future;
+      }
+    }
+
     Completer<T> taskCompleter;
     _Task<T> task;
-    key ??= platformCall.hashCode;
     final toResume = _paused.remove(key);
     if (toResume != null) {
       priority = toResume.$1;

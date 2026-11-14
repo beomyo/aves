@@ -161,15 +161,30 @@ mixin CloudSettings on SettingsAccess {
 
   set cloudShowDimensions(bool newValue) => set(SettingKeys.cloudShowDimensionsKey, newValue);
 
-  // show the thumbnail strip at the bottom of the image viewer
+  // show the thumbnail strip in the image viewer
   bool get cloudViewerThumbnails => getBool(SettingKeys.cloudViewerThumbnailsKey) ?? true;
 
   set cloudViewerThumbnails(bool newValue) => set(SettingKeys.cloudViewerThumbnailsKey, newValue);
 
-  // show the scrubber progress bar at the bottom of the image viewer
+  // position of thumbnail strip in viewer: 'bottom', 'left', 'right'
+  String get cloudViewerThumbnailsPosition => getString(SettingKeys.cloudViewerThumbnailsPositionKey) ?? 'bottom';
+
+  set cloudViewerThumbnailsPosition(String newValue) => set(SettingKeys.cloudViewerThumbnailsPositionKey, newValue);
+
+  // show the scrubber progress bar in the image viewer
   bool get cloudViewerProgressBar => getBool(SettingKeys.cloudViewerProgressBarKey) ?? true;
 
   set cloudViewerProgressBar(bool newValue) => set(SettingKeys.cloudViewerProgressBarKey, newValue);
+
+  // position of scrubber progress bar in viewer: 'bottom', 'left', 'right'
+  String get cloudViewerProgressBarPosition => getString(SettingKeys.cloudViewerProgressBarPositionKey) ?? 'bottom';
+
+  set cloudViewerProgressBarPosition(String newValue) => set(SettingKeys.cloudViewerProgressBarPositionKey, newValue);
+
+  // layout mode in image viewer: 'paged' (page-by-page) or 'continuous' (seamless horizontal strip)
+  String get cloudViewerLayoutMode => getString(SettingKeys.cloudViewerLayoutModeKey) ?? 'paged';
+
+  set cloudViewerLayoutMode(String newValue) => set(SettingKeys.cloudViewerLayoutModeKey, newValue);
 
   // hide the app bar, address bar and layout bar while scrolling down
   bool get cloudImmersive => getBool(SettingKeys.cloudImmersiveKey) ?? true;

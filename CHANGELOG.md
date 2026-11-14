@@ -25,6 +25,18 @@ All notable changes to this project will be documented in this file.
 - Cloud videos: actually resume at the saved position. Attaching the video surface made the backend seek back to the position it knew (still the start), which restarted playback from the beginning right after resuming. It now waits for the duration and holds the position through that window
 - Video: pausing and resuming no longer jumps back to the last saved position
 
+## <a id="v1.19.21"></a>[v1.19.21] - 2026-11-14
+
+### Added
+
+- Cloud viewer: consolidated top settings button with a modal sheet to configure thumbnail strip and progress bar visibility and positions (bottom, left, right)
+- Cloud viewer: continuous horizontal strip mode (`一张一张左右排列`) allowing seamless pan/scroll across all images as a unified horizontal strip with pinch zoom and double-tap zoom
+
+### Fixed
+
+- Cloud thumbnails: prevent deadlock/hanging spinners in `servicePolicy` when tasks with the same key are enqueued or refreshed concurrently
+- Cloud WebDAV: fresh timeout per retry attempt, handling transient network errors and 429/5xx responses gracefully
+
 ## <a id="v1.19.20"></a>[v1.19.20] - 2026-11-06
 
 ### Added

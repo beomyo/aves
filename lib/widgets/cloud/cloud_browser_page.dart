@@ -39,7 +39,7 @@ enum _LoadState { loading, ready, error }
 
 // remote thumbnails can fail transiently (timeout, rate limit): retry a few
 // times with a growing delay, after the extraction cooldown has expired
-const _cloudThumbnailRetryDelays = [Duration(seconds: 6), Duration(seconds: 18), Duration(seconds: 45), Duration(seconds: 90)];
+const _cloudThumbnailRetryDelays = [Duration(milliseconds: 500), Duration(seconds: 2), Duration(seconds: 6), Duration(seconds: 20)];
 
 // duration badge of a cloud video, or null when it is unknown or hidden
 String? _cloudVideoDurationText(AvesEntry entry, {required bool visible}) {

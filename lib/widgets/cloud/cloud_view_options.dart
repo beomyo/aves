@@ -211,6 +211,20 @@ class CloudViewOptionsSheet extends StatelessWidget {
           onChanged: (v) => settings.cloudShowDimensions = v,
         ),
         const Divider(height: 24),
+        ListTile(
+          title: Text(l10n.cloudViewerMode),
+          trailing: DropdownButton<String>(
+            value: settings.cloudViewerLayoutMode,
+            underline: const SizedBox.shrink(),
+            items: [
+              DropdownMenuItem(value: 'paged', child: Text(l10n.cloudViewerModePaged)),
+              DropdownMenuItem(value: 'continuous', child: Text(l10n.cloudViewerModeContinuous)),
+            ],
+            onChanged: (v) {
+              if (v != null) settings.cloudViewerLayoutMode = v;
+            },
+          ),
+        ),
         SwitchListTile(
           title: Text(l10n.cloudViewerThumbnails),
           value: settings.cloudViewerThumbnails,

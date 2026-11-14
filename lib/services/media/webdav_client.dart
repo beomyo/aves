@@ -70,6 +70,8 @@ class WebDavClient implements CloudClient {
     try {
       return await action();
     } on _TransportError {
+      // brief pause before second try to allow server/network connection to stabilize
+      await Future<void>.delayed(const Duration(milliseconds: 500));
       try {
         return await action();
       } on _TransportError catch (retryError) {
@@ -128,11 +130,12 @@ class WebDavClient implements CloudClient {
   @override
   Future<Uint8List> getBytes(String url, {CloudAbort? abort}) {
     final requestUrl = resolve(url);
-    // the deadline aborts the transfer itself, not only the future waiting on
-    // it: a stalled body used to keep its connection for the full timeout
-    final deadline = CloudAbort();
-    final timer = Timer(_getTimeout, deadline.abort);
-    return _withRetry(() => _download(requestUrl, abort, deadline)).whenComplete(timer.cancel);
+    // deadline is scoped per attempt so a retry gets a fresh timeout instead of inheriting an aborted deadline
+    return _withRetry(() {
+      final deadline = CloudAbort();
+      final timer = Timer(_getTimeout, deadline.abort);
+      return _download(requestUrl, abort, deadline).whenComplete(timer.cancel);
+    });
   }
 
   Future<Uint8List> _download(Uri requestUrl, CloudAbort? caller, CloudAbort deadline) async {
@@ -148,8 +151,13 @@ class WebDavClient implements CloudClient {
       throw _TransportError(e);
     } on http.ClientException catch (e) {
       throw _TransportError(e);
+    } on TimeoutException catch (e) {
+      throw _TransportError(e);
     }
     if (response.statusCode >= 400) {
+      if (response.statusCode == 429 || (response.statusCode >= 500 && response.statusCode <= 504)) {
+        throw _TransportError(HttpException('server error ${response.statusCode}', uri: requestUrl));
+      }
       throw CloudException('failed to download file', statusCode: response.statusCode);
     }
 
